@@ -1,9 +1,10 @@
 import type { RefDecision, RefDecisionInput } from "./types";
 
 /**
- * Direction always names the side that receives the write. "githubIsAncestorOfAzure"
- * means azure's tip is a descendant of github's tip (azure is ahead) -> github is the
- * side that needs to catch up, so the fast-forward direction is "to-github".
+ * GitHub is authoritative. Azure DevOps only ever gets auto-updated when GitHub is
+ * ahead or equal; anything where Azure has content GitHub doesn't (strictly ahead,
+ * truly diverged, or a brand-new Azure-only ref) always pauses for an explicit
+ * choice in the GUI, never auto-resolved.
  */
 export function decideRef(input: RefDecisionInput): RefDecision {
   const { githubSha, azureSha } = input;
@@ -12,37 +13,46 @@ export function decideRef(input: RefDecisionInput): RefDecision {
     return { kind: "noop" };
   }
 
-  if (githubSha === null && azureSha !== null) {
-    if (input.previouslySeen) {
-      return { kind: "delete", direction: "to-azure", sha: azureSha };
-    }
-    return { kind: "create", direction: "to-github", sha: azureSha };
+  if (azureSha === null && githubSha !== null) {
+    // Azure doesn't have it (brand new, or it lost it) - GitHub is authoritative,
+    // so always (re)push regardless of history. This is also how an accidental
+    // Azure-side deletion self-heals: GitHub's copy just gets pushed back.
+    return { kind: "push-to-azure", fromSha: null, toSha: githubSha };
   }
 
-  if (azureSha === null && githubSha !== null) {
+  if (githubSha === null && azureSha !== null) {
     if (input.previouslySeen) {
-      return { kind: "delete", direction: "to-github", sha: githubSha };
+      // GitHub intentionally deleted something that used to exist on both sides -
+      // mirror that deletion onto Azure.
+      return { kind: "delete-on-azure", sha: azureSha };
     }
-    return { kind: "create", direction: "to-azure", sha: githubSha };
+    // A ref that has only ever existed on Azure DevOps - needs an explicit choice
+    // before it's imported into GitHub, even though nothing would be overwritten.
+    return {
+      kind: "azure-ahead",
+      githubSha: null,
+      azureSha,
+      githubCommitDate: null,
+      azureCommitDate: input.azureCommitDate ?? "",
+    };
   }
 
   // Both sides have the ref, tips differ.
-  if (input.githubIsAncestorOfAzure) {
-    return { kind: "fast-forward", direction: "to-github", fromSha: githubSha, toSha: azureSha! };
-  }
   if (input.azureIsAncestorOfGithub) {
-    return { kind: "fast-forward", direction: "to-azure", fromSha: azureSha, toSha: githubSha! };
+    // GitHub is strictly ahead - nothing on Azure is lost by catching it up.
+    return { kind: "push-to-azure", fromSha: azureSha, toSha: githubSha! };
   }
 
-  // True divergence (including totally unrelated histories, e.g. a freshly
-  // auto-initialized empty repo on one side). Never auto-resolve this - it's
-  // exactly the case where picking a "winner" automatically can silently
-  // discard real work. Surface it as a pending conflict for a human to resolve.
+  // Azure has commits GitHub doesn't - whether it's cleanly ahead of GitHub or
+  // truly diverged, both cases mean accepting it would require a decision, so
+  // both pause identically. This is also what protects against the failure mode
+  // that caused real damage before: an auto-generated placeholder commit on Azure
+  // being "newer" than real GitHub work is no longer a signal this code trusts.
   return {
-    kind: "manual-conflict",
-    githubSha: githubSha!,
+    kind: "azure-ahead",
+    githubSha,
     azureSha: azureSha!,
-    githubCommitDate: input.githubCommitDate ?? "",
+    githubCommitDate: input.githubCommitDate,
     azureCommitDate: input.azureCommitDate ?? "",
   };
 }

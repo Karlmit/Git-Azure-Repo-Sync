@@ -55,7 +55,7 @@ export interface CreateConnectionInput {
 
 export type UpdateConnectionInput = Partial<CreateConnectionInput> & { enabled?: boolean };
 
-export type RefDecisionKind = "noop" | "create" | "fast-forward" | "manual-conflict" | "delete";
+export type RefDecisionKind = "noop" | "push-to-azure" | "delete-on-azure" | "azure-ahead";
 
 export interface SyncPlanItem {
   refName: string;
@@ -74,9 +74,10 @@ export interface PendingConflict {
   connectionId: string;
   refName: string;
   isTag: boolean;
-  githubSha: string;
+  /** Null if this ref has only ever existed on Azure DevOps. */
+  githubSha: string | null;
   azureSha: string;
-  githubCommitDate: string;
+  githubCommitDate: string | null;
   azureCommitDate: string;
   githubSummary: string | null;
   azureSummary: string | null;
@@ -152,7 +153,7 @@ export const api = {
 
   listConflicts: (id: string) => request<PendingConflict[]>(`/connections/${id}/conflicts`),
   resolveConflict: (id: string, refName: string, winner: ConflictWinner) =>
-    request<{ winningSha: string }>(`/connections/${id}/conflicts/resolve`, {
+    request<{ winningSha: string | null }>(`/connections/${id}/conflicts/resolve`, {
       method: "POST",
       body: JSON.stringify({ refName, winner }),
     }),

@@ -9,7 +9,7 @@ import type { SyncLogsRepo } from "../models/syncLogs.repo";
 import type { RefStateRepo } from "../models/refState.repo";
 import type { PendingConflictsRepo } from "../models/pendingConflicts.repo";
 import { decideRef } from "./branchPlan";
-import type { Direction, PlanItem, SyncPlan, SyncResult } from "./types";
+import type { PlanItem, SyncPlan, SyncResult } from "./types";
 
 export interface SyncEngineDeps {
   connectionsRepo: ConnectionsRepo;
@@ -49,22 +49,23 @@ async function buildPlanForKind(
     const githubSha = githubRefs.get(name) ?? null;
     const azureSha = azureRefs.get(name) ?? null;
 
-    let githubIsAncestorOfAzure = false;
     let azureIsAncestorOfGithub = false;
     let githubCommitDate: string | null = null;
     let azureCommitDate: string | null = null;
 
     if (githubSha && azureSha && githubSha !== azureSha) {
-      [githubIsAncestorOfAzure, azureIsAncestorOfGithub] = await Promise.all([
-        isAncestor(mirrorDir, githubSha, azureSha),
-        isAncestor(mirrorDir, azureSha, githubSha),
-      ]);
-      if (!githubIsAncestorOfAzure && !azureIsAncestorOfGithub) {
+      azureIsAncestorOfGithub = await isAncestor(mirrorDir, azureSha, githubSha);
+      if (!azureIsAncestorOfGithub) {
+        // Azure has content GitHub doesn't (strictly ahead or truly diverged) -
+        // this will pause, so fetch dates for the GUI to show.
         [githubCommitDate, azureCommitDate] = await Promise.all([
           commitDate(mirrorDir, githubSha),
           commitDate(mirrorDir, azureSha),
         ]);
       }
+    } else if (azureSha && !githubSha) {
+      // Azure-only ref - also pauses (unless previously seen), so fetch its date too.
+      azureCommitDate = await commitDate(mirrorDir, azureSha);
     }
 
     const decision = decideRef({
@@ -73,7 +74,6 @@ async function buildPlanForKind(
       azureSha,
       githubCommitDate,
       azureCommitDate,
-      githubIsAncestorOfAzure,
       azureIsAncestorOfGithub,
       previouslySeen: previouslySeenRefs.has(fullRefName),
     });
@@ -89,14 +89,12 @@ async function applyDecision(mirrorDir: string, item: PlanItem, urls: Urls): Pro
   const refPrefix = refPrefixFor(isTag);
   const secrets = [urls.githubToken, urls.azureToken];
 
-  const targetUrlFor = (direction: Direction) => (direction === "to-github" ? urls.githubAuthUrl : urls.azureAuthUrl);
-
   switch (decision.kind) {
     case "noop":
       return;
 
-    case "create": {
-      await runGit(["push", targetUrlFor(decision.direction), `${decision.sha}:${refPrefix}/${shortName}`], {
+    case "push-to-azure": {
+      await runGit(["push", urls.azureAuthUrl, `${decision.toSha}:${refPrefix}/${shortName}`], {
         cwd: mirrorDir,
         timeoutMs: 60_000,
         secrets,
@@ -104,8 +102,8 @@ async function applyDecision(mirrorDir: string, item: PlanItem, urls: Urls): Pro
       return;
     }
 
-    case "fast-forward": {
-      await runGit(["push", targetUrlFor(decision.direction), `${decision.toSha}:${refPrefix}/${shortName}`], {
+    case "delete-on-azure": {
+      await runGit(["push", urls.azureAuthUrl, `:${refPrefix}/${shortName}`], {
         cwd: mirrorDir,
         timeoutMs: 60_000,
         secrets,
@@ -113,19 +111,10 @@ async function applyDecision(mirrorDir: string, item: PlanItem, urls: Urls): Pro
       return;
     }
 
-    case "manual-conflict":
+    case "azure-ahead":
       // Never auto-applied - handled separately in the main loop by recording a
       // pending conflict instead of pushing anything.
       return;
-
-    case "delete": {
-      await runGit(["push", targetUrlFor(decision.direction), `:${refPrefix}/${shortName}`], {
-        cwd: mirrorDir,
-        timeoutMs: 60_000,
-        secrets,
-      });
-      return;
-    }
   }
 }
 
@@ -208,12 +197,12 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
         continue;
       }
 
-      if (item.decision.kind === "manual-conflict") {
+      if (item.decision.kind === "azure-ahead") {
         currentConflictRefs.add(item.refName);
         hadManualConflict = true;
         const { githubSha, azureSha, githubCommitDate, azureCommitDate } = item.decision;
         const [githubSummary, azureSummary] = await Promise.all([
-          commitSummary(mirrorDir, githubSha),
+          githubSha ? commitSummary(mirrorDir, githubSha) : Promise.resolve(null),
           commitSummary(mirrorDir, azureSha),
         ]);
         deps.pendingConflictsRepo.upsert(connectionId, {
@@ -226,10 +215,11 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
           githubSummary,
           azureSummary,
         });
+        const githubLabel = githubSha ? `${githubSha.slice(0, 7)}, ${githubCommitDate}` : "does not exist yet";
         deps.syncLogsRepo.insert(
           connectionId,
           "warn",
-          `Conflict on ${item.refName}: GitHub (${githubSha.slice(0, 7)}, ${githubCommitDate}) and Azure DevOps (${azureSha.slice(0, 7)}, ${azureCommitDate}) have diverged - resolve from the GUI`,
+          `Azure DevOps has changes GitHub doesn't on ${item.refName} (GitHub: ${githubLabel}; Azure DevOps: ${azureSha.slice(0, 7)}, ${azureCommitDate}) - resolve from the GUI`,
           { branch: item.refName, githubSha, azureSha, githubCommitDate, azureCommitDate },
         );
         continue;
@@ -238,16 +228,14 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
       try {
         await applyDecision(mirrorDir, item, urls);
 
-        if (item.decision.kind === "delete") {
+        if (item.decision.kind === "delete-on-azure") {
           deps.refStateRepo.deleteRef(connectionId, item.refName);
         } else {
-          const sha = item.decision.kind === "create" ? item.decision.sha : item.decision.toSha;
-          deps.refStateRepo.upsert(connectionId, item.refName, sha, sha);
+          deps.refStateRepo.upsert(connectionId, item.refName, item.decision.toSha, item.decision.toSha);
         }
 
         deps.syncLogsRepo.insert(connectionId, "info", `${item.decision.kind} applied to ${item.refName}`, {
           branch: item.refName,
-          direction: item.decision.direction,
         });
       } catch (err) {
         const classified = classifyGitError(err);

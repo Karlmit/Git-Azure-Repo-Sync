@@ -1,17 +1,24 @@
-export type Direction = "to-github" | "to-azure";
-
+/**
+ * GitHub is the authoritative side. Whenever GitHub is ahead or equal (including a
+ * GitHub-side delete), Azure DevOps is updated automatically - "push-to-azure" and
+ * "delete-on-azure" always apply without pausing. Whenever Azure DevOps has *any*
+ * content GitHub doesn't (a strict fast-forward-ahead, a true divergence, or a
+ * brand-new Azure-only branch never seen before), nothing is pushed automatically -
+ * "azure-ahead" always requires an explicit choice from the GUI. Azure-side
+ * deletions are never propagated back to GitHub; if Azure loses something GitHub
+ * still has, GitHub's copy is simply re-pushed (see decideRef for why).
+ */
 export type RefDecision =
   | { kind: "noop" }
-  | { kind: "create"; direction: Direction; sha: string }
-  | { kind: "fast-forward"; direction: Direction; fromSha: string | null; toSha: string }
+  | { kind: "push-to-azure"; fromSha: string | null; toSha: string }
+  | { kind: "delete-on-azure"; sha: string }
   | {
-      kind: "manual-conflict";
-      githubSha: string;
+      kind: "azure-ahead";
+      githubSha: string | null;
       azureSha: string;
-      githubCommitDate: string;
+      githubCommitDate: string | null;
       azureCommitDate: string;
-    }
-  | { kind: "delete"; direction: Direction; sha: string };
+    };
 
 export interface RefDecisionInput {
   refName: string;
@@ -19,7 +26,7 @@ export interface RefDecisionInput {
   azureSha: string | null;
   githubCommitDate: string | null;
   azureCommitDate: string | null;
-  githubIsAncestorOfAzure: boolean;
+  /** Whether azureSha is an ancestor of githubSha, i.e. GitHub is ahead (or equal) - the only case that auto-applies. */
   azureIsAncestorOfGithub: boolean;
   previouslySeen: boolean;
 }

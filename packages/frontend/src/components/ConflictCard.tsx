@@ -7,17 +7,23 @@ function Side({
   summary,
 }: {
   label: string;
-  sha: string;
-  date: string;
+  sha: string | null;
+  date: string | null;
   summary: string | null;
 }) {
   return (
     <div style={{ flex: 1, padding: 8, background: "#f9fafb", borderRadius: 4 }}>
       <div style={{ fontWeight: 600, fontSize: 13 }}>{label}</div>
-      <div style={{ fontSize: 12, color: "#374151", marginTop: 4 }}>
-        <code>{sha.slice(0, 7)}</code> &middot; {new Date(date).toLocaleString()}
-      </div>
-      {summary && <div style={{ fontSize: 13, marginTop: 4 }}>{summary}</div>}
+      {sha ? (
+        <>
+          <div style={{ fontSize: 12, color: "#374151", marginTop: 4 }}>
+            <code>{sha.slice(0, 7)}</code> &middot; {date ? new Date(date).toLocaleString() : ""}
+          </div>
+          {summary && <div style={{ fontSize: 13, marginTop: 4 }}>{summary}</div>}
+        </>
+      ) : (
+        <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4, fontStyle: "italic" }}>Doesn't exist yet</div>
+      )}
     </div>
   );
 }
@@ -32,6 +38,9 @@ export function ConflictCard({
   onResolve: (winner: "github" | "azure") => void;
 }) {
   const shortName = conflict.refName.replace(/^refs\/(heads|tags)\//, "");
+  const rejectLabel = conflict.githubSha
+    ? "Discard Azure's changes, keep GitHub"
+    : "Delete this from Azure DevOps";
   return (
     <div style={{ border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 6, padding: 12, marginBottom: 12 }}>
       <div style={{ fontWeight: 600, marginBottom: 8 }}>
@@ -42,11 +51,11 @@ export function ConflictCard({
         <Side label="Azure DevOps" sha={conflict.azureSha} date={conflict.azureCommitDate} summary={conflict.azureSummary} />
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button disabled={busy} onClick={() => onResolve("github")}>
-          Keep GitHub version
-        </button>
         <button disabled={busy} onClick={() => onResolve("azure")}>
-          Keep Azure DevOps version
+          Pull Azure's changes into GitHub
+        </button>
+        <button disabled={busy} onClick={() => onResolve("github")}>
+          {rejectLabel}
         </button>
       </div>
     </div>

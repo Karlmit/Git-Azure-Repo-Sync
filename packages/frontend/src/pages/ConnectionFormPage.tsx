@@ -298,8 +298,8 @@ export function ConnectionFormPage() {
 
       <ConfirmDialog
         open={confirmForcePushOpen}
-        title="Heads up: how conflicts are handled"
-        message="Clean changes on either side sync automatically. If GitHub and Azure DevOps ever have genuinely conflicting changes on the same branch, sync pauses on that branch and asks you to pick a side from this app's GUI - nothing is force-pushed automatically. Understood?"
+        title="Heads up: how syncing works"
+        message="GitHub is treated as the source of truth: changes on GitHub push to Azure DevOps automatically. If Azure DevOps ever has changes GitHub doesn't (someone worked there directly), sync pauses on that ref and asks you to choose - pull those changes into GitHub, or discard them - nothing is pushed automatically in that case. Understood?"
         confirmLabel="Yes, create connection"
         onCancel={() => setConfirmForcePushOpen(false)}
         onConfirm={() => {

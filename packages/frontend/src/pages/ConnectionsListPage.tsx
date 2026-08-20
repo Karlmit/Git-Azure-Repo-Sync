@@ -39,14 +39,14 @@ export function ConnectionsListPage() {
     try {
       const result = await api.syncNow(conn.id);
       await refresh();
-      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "manual-conflict");
-      const conflictCount = result.plan.filter((p) => p.decision.kind === "manual-conflict").length;
+      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "azure-ahead");
+      const conflictCount = result.plan.filter((p) => p.decision.kind === "azure-ahead").length;
       if (result.status === "error") {
         setMessage({ kind: "error", text: `${conn.name}: sync failed - ${result.error ?? "see its logs"}` });
       } else if (conflictCount > 0) {
         setMessage({
           kind: "warn",
-          text: `${conn.name}: ${conflictCount} ref${conflictCount === 1 ? "" : "s"} diverged - open the connection to decide which side to keep.`,
+          text: `${conn.name}: Azure DevOps has changes on ${conflictCount} ref${conflictCount === 1 ? "" : "s"} - open the connection to decide.`,
         });
       } else if (changed.length === 0) {
         setMessage({ kind: "success", text: `${conn.name}: already up to date.` });

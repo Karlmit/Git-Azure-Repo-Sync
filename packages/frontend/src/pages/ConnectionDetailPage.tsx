@@ -49,14 +49,14 @@ export function ConnectionDetailPage() {
     setBanner(null);
     try {
       const result = await api.syncNow(conn.id);
-      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "manual-conflict");
-      const conflictCount = result.plan.filter((p) => p.decision.kind === "manual-conflict").length;
+      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "azure-ahead");
+      const conflictCount = result.plan.filter((p) => p.decision.kind === "azure-ahead").length;
       if (result.status === "error") {
         setBanner({ kind: "error", text: result.error ?? "Sync failed - see the logs below." });
       } else if (conflictCount > 0) {
         setBanner({
           kind: "warn",
-          text: `Synced, but ${conflictCount} ref${conflictCount === 1 ? "" : "s"} diverged and need${conflictCount === 1 ? "s" : ""} your decision below.`,
+          text: `Synced, but Azure DevOps has changes on ${conflictCount} ref${conflictCount === 1 ? "" : "s"} that need${conflictCount === 1 ? "s" : ""} your decision below.`,
         });
       } else if (changed.length === 0) {
         setBanner({ kind: "success", text: "Already up to date - nothing to sync." });
@@ -81,7 +81,13 @@ export function ConnectionDetailPage() {
     setBanner(null);
     try {
       await api.resolveConflict(conn.id, refName, winner);
-      setBanner({ kind: "success", text: `Resolved - kept the ${winner === "github" ? "GitHub" : "Azure DevOps"} version.` });
+      setBanner({
+        kind: "success",
+        text:
+          winner === "azure"
+            ? "Resolved - pulled Azure DevOps's changes into GitHub."
+            : "Resolved - discarded Azure DevOps's changes, GitHub's version stands.",
+      });
     } catch (err) {
       setBanner({ kind: "error", text: err instanceof Error ? err.message : "Failed to resolve conflict." });
     } finally {
@@ -150,8 +156,9 @@ export function ConnectionDetailPage() {
         <div style={{ marginBottom: 20 }}>
           <h3>Needs your decision</h3>
           <p style={{ fontSize: 13, color: "#6b7280", marginTop: -4 }}>
-            GitHub and Azure DevOps have unrelated changes on these refs - pick which side's version to keep. The
-            other side will be force-updated to match.
+            GitHub always pushes to Azure DevOps automatically - but Azure DevOps has changes on these refs that
+            GitHub doesn't have, so nothing has been touched. Choose whether to pull them into GitHub, or discard
+            them and keep GitHub's version.
           </p>
           {(conflicts ?? []).map((c) => (
             <ConflictCard
@@ -186,7 +193,17 @@ export function ConnectionDetailPage() {
       <ConfirmDialog
         open={pendingResolve !== null}
         title="Force-push this decision?"
-        message={`This overwrites the ${pendingResolve?.winner === "github" ? "Azure DevOps" : "GitHub"} version of "${pendingResolve?.refName.replace(/^refs\/(heads|tags)\//, "")}" with the ${pendingResolve?.winner === "github" ? "GitHub" : "Azure DevOps"} version. This cannot be undone automatically.`}
+        message={(() => {
+          if (!pendingResolve) return "";
+          const shortName = pendingResolve.refName.replace(/^refs\/(heads|tags)\//, "");
+          const conflict = (conflicts ?? []).find((c) => c.refName === pendingResolve.refName);
+          if (pendingResolve.winner === "azure") {
+            return `This overwrites GitHub's "${shortName}" with Azure DevOps's version. This cannot be undone automatically.`;
+          }
+          return conflict?.githubSha
+            ? `This overwrites Azure DevOps's "${shortName}" with GitHub's version. This cannot be undone automatically.`
+            : `GitHub has no "${shortName}" - this deletes it from Azure DevOps too. This cannot be undone automatically.`;
+        })()}
         confirmLabel="Force-push"
         onCancel={() => setPendingResolve(null)}
         onConfirm={confirmResolve}

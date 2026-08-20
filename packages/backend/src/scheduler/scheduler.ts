@@ -29,7 +29,7 @@ export class Scheduler {
     connectionId: string,
     refName: string,
     winner: ConflictWinner,
-  ): Promise<{ winningSha: string }> {
+  ): Promise<{ winningSha: string | null }> {
     if (this.running.has(connectionId)) {
       throw new Error("A sync is currently in progress for this connection - try again in a moment.");
     }

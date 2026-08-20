@@ -59,6 +59,10 @@ function revParse(bareDir: string, ref = "refs/heads/main"): string | null {
   }
 }
 
+function sh(...args: string[]): string {
+  return require("node:child_process").execFileSync("git", args).toString().trim();
+}
+
 test("both sides empty: first sync is a no-op with status ok", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
@@ -71,7 +75,7 @@ test("both sides empty: first sync is a no-op with status ok", async () => {
   assert.equal(result.plan.length, 0);
 });
 
-test("one side empty: branch is created on the empty side", async () => {
+test("GitHub-only branch (Azure empty): pushed to Azure automatically", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
@@ -83,12 +87,12 @@ test("one side empty: branch is created on the empty side", async () => {
   const result = await runSyncForConnection(deps, conn.id);
 
   assert.equal(result.status, "ok");
-  const created = result.plan.find((p) => p.refName === "refs/heads/main");
-  assert.equal(created?.decision.kind, "create");
+  const item = result.plan.find((p) => p.refName === "refs/heads/main");
+  assert.equal(item?.decision.kind, "push-to-azure");
   assert.equal(revParse(azure), sha);
 });
 
-test("clean fast-forward: lagging side catches up without force", async () => {
+test("GitHub ahead (clean fast-forward): pushed to Azure automatically", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
@@ -106,60 +110,50 @@ test("clean fast-forward: lagging side catches up without force", async () => {
 
   assert.equal(result.status, "ok");
   const item = result.plan.find((p) => p.refName === "refs/heads/main");
-  assert.equal(item?.decision.kind, "fast-forward");
+  assert.equal(item?.decision.kind, "push-to-azure");
   assert.equal(revParse(azure), sha2);
   assert.equal(revParse(github), sha2);
 });
 
-test("true divergence with common ancestor: pauses as a pending conflict, nothing is pushed automatically", async () => {
+test("Azure strictly ahead (clean ancestor, but Azure): pauses instead of auto-fast-forwarding GitHub", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
   const work = fx.makeWorkTree();
 
-  const base = fx.commitFile(work, "base");
+  const sha1 = fx.commitFile(work, "base");
   fx.push(work, github, "main");
   fx.push(work, azure, "main");
 
-  const older = fx.commitFile(work, "older-branch", "2020-01-01T00:00:00Z");
+  const sha2 = fx.commitFile(work, "colleague-work-on-azure");
   fx.push(work, azure, "main");
-
-  fx.resetHard(work, base);
-  const newer = fx.commitFile(work, "newer-branch", "2024-01-01T00:00:00Z");
-  fx.push(work, github, "main");
 
   const conn = createConnection(deps, github, azure);
   const result = await runSyncForConnection(deps, conn.id);
 
   assert.equal(result.status, "conflict");
   const item = result.plan.find((p) => p.refName === "refs/heads/main");
-  assert.equal(item?.decision.kind, "manual-conflict");
-  if (item?.decision.kind === "manual-conflict") {
-    assert.equal(item.decision.githubSha, newer);
-    assert.equal(item.decision.azureSha, older);
+  assert.equal(item?.decision.kind, "azure-ahead");
+  if (item?.decision.kind === "azure-ahead") {
+    assert.equal(item.decision.githubSha, sha1);
+    assert.equal(item.decision.azureSha, sha2);
   }
-
-  // Nothing was pushed - both remotes are exactly as the sync found them.
-  assert.equal(revParse(azure), older);
-  assert.equal(revParse(github), newer);
-
-  const conflict = deps.pendingConflictsRepo.get(conn.id, "refs/heads/main");
-  assert.ok(conflict);
-  assert.equal(conflict?.githubSha, newer);
-  assert.equal(conflict?.azureSha, older);
+  // Nothing was pushed - GitHub did NOT get auto-fast-forwarded.
+  assert.equal(revParse(github), sha1);
+  assert.equal(revParse(azure), sha2);
 });
 
-test("unrelated histories: also pauses as a pending conflict, no special-casing needed", async () => {
+test("true divergence (unrelated histories) also pauses as azure-ahead", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
 
   const workA = fx.makeWorkTree();
-  const shaOld = fx.commitFile(workA, "independent-a", "2019-06-01T00:00:00Z");
+  const shaGithub = fx.commitFile(workA, "independent-a");
   fx.push(workA, github, "main");
 
   const workB = fx.makeWorkTree();
-  const shaNew = fx.commitFile(workB, "independent-b", "2024-06-01T00:00:00Z");
+  const shaAzure = fx.commitFile(workB, "independent-b");
   fx.push(workB, azure, "main");
 
   const conn = createConnection(deps, github, azure);
@@ -167,46 +161,39 @@ test("unrelated histories: also pauses as a pending conflict, no special-casing 
 
   assert.equal(result.status, "conflict");
   const item = result.plan.find((p) => p.refName === "refs/heads/main");
-  assert.equal(item?.decision.kind, "manual-conflict");
-  assert.equal(revParse(github), shaOld);
-  assert.equal(revParse(azure), shaNew);
+  assert.equal(item?.decision.kind, "azure-ahead");
+  assert.equal(revParse(github), shaGithub);
+  assert.equal(revParse(azure), shaAzure);
 });
 
-test("resolveConflict: applying the chosen side pushes it, clears the pending conflict, and status returns to ok", async () => {
+test("resolveConflict accept: pulls Azure's version into GitHub", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
   const work = fx.makeWorkTree();
 
-  const base = fx.commitFile(work, "base");
+  fx.commitFile(work, "base");
   fx.push(work, github, "main");
   fx.push(work, azure, "main");
-
-  const older = fx.commitFile(work, "older-branch", "2020-01-01T00:00:00Z");
+  const azureAhead = fx.commitFile(work, "azure-work");
   fx.push(work, azure, "main");
-
-  fx.resetHard(work, base);
-  const newer = fx.commitFile(work, "newer-branch", "2024-01-01T00:00:00Z");
-  fx.push(work, github, "main");
 
   const conn = createConnection(deps, github, azure);
   await runSyncForConnection(deps, conn.id);
   assert.equal(deps.connectionsRepo.getById(conn.id)?.status, "conflict");
 
-  const { winningSha } = await resolveConflict(deps, conn.id, "refs/heads/main", "github");
+  const { winningSha } = await resolveConflict(deps, conn.id, "refs/heads/main", "azure");
 
-  assert.equal(winningSha, newer);
-  assert.equal(revParse(azure), newer); // losing side (azure) force-updated to match github
-  assert.equal(revParse(github), newer);
+  assert.equal(winningSha, azureAhead);
+  assert.equal(revParse(github), azureAhead);
   assert.equal(deps.pendingConflictsRepo.get(conn.id, "refs/heads/main"), null);
   assert.equal(deps.connectionsRepo.getById(conn.id)?.status, "ok");
 
-  // A subsequent sync sees both sides equal now - no conflict resurfaces.
   const second = await runSyncForConnection(deps, conn.id);
   assert.equal(second.status, "ok");
 });
 
-test("a conflict that resolves itself (one side fast-forwarded since detection) is pruned automatically", async () => {
+test("resolveConflict reject: discards Azure's version, force-pushes GitHub's over it", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
@@ -215,38 +202,106 @@ test("a conflict that resolves itself (one side fast-forwarded since detection) 
   const base = fx.commitFile(work, "base");
   fx.push(work, github, "main");
   fx.push(work, azure, "main");
-
-  fx.commitFile(work, "older-branch", "2020-01-01T00:00:00Z");
+  fx.commitFile(work, "azure-junk-commit");
   fx.push(work, azure, "main");
-
-  fx.resetHard(work, base);
-  fx.commitFile(work, "newer-branch", "2024-01-01T00:00:00Z");
-  fx.push(work, github, "main");
 
   const conn = createConnection(deps, github, azure);
   await runSyncForConnection(deps, conn.id);
-  assert.ok(deps.pendingConflictsRepo.get(conn.id, "refs/heads/main"));
 
-  // Someone manually fast-forwards azure's main onto github's version outside gitsync.
-  require("node:child_process").execFileSync("git", ["-C", work, "push", "-f", azure, "main"]);
+  const { winningSha } = await resolveConflict(deps, conn.id, "refs/heads/main", "github");
 
-  const result = await runSyncForConnection(deps, conn.id);
-  assert.equal(result.status, "ok");
+  assert.equal(winningSha, base);
+  assert.equal(revParse(azure), base);
+  assert.equal(revParse(github), base);
   assert.equal(deps.pendingConflictsRepo.get(conn.id, "refs/heads/main"), null);
+  assert.equal(deps.connectionsRepo.getById(conn.id)?.status, "ok");
 });
 
-test("branch deletion propagates only after a prior successful sync, never on first sync", async () => {
+test("brand-new Azure-only branch pauses for approval instead of auto-importing", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
   const work = fx.makeWorkTree();
 
-  // "main" stays untouched throughout (it's HEAD on both bare repos, which real git
-  // servers refuse to delete via push anyway) - the interesting ref is "feature".
   fx.commitFile(work, "base");
   fx.push(work, github, "main");
   fx.push(work, azure, "main");
-  require("node:child_process").execFileSync("git", ["-C", work, "checkout", "-b", "feature"]);
+
+  sh("-C", work, "checkout", "-b", "azure-only-feature");
+  const featureSha = fx.commitFile(work, "azure-only-work");
+  fx.push(work, azure, "azure-only-feature");
+
+  const conn = createConnection(deps, github, azure);
+  const result = await runSyncForConnection(deps, conn.id);
+
+  assert.equal(result.status, "conflict");
+  const item = result.plan.find((p) => p.refName === "refs/heads/azure-only-feature");
+  assert.equal(item?.decision.kind, "azure-ahead");
+  if (item?.decision.kind === "azure-ahead") {
+    assert.equal(item.decision.githubSha, null);
+    assert.equal(item.decision.azureSha, featureSha);
+  }
+  assert.equal(revParse(github, "refs/heads/azure-only-feature"), null);
+
+  const conflict = deps.pendingConflictsRepo.get(conn.id, "refs/heads/azure-only-feature");
+  assert.equal(conflict?.githubSha, null);
+});
+
+test("brand-new Azure-only branch: accepting imports it into GitHub", async () => {
+  const deps = createDeps();
+  const github = fx.makeBareRepo();
+  const azure = fx.makeBareRepo();
+  const work = fx.makeWorkTree();
+
+  fx.commitFile(work, "base");
+  fx.push(work, github, "main");
+  fx.push(work, azure, "main");
+  sh("-C", work, "checkout", "-b", "azure-only-feature");
+  const featureSha = fx.commitFile(work, "azure-only-work");
+  fx.push(work, azure, "azure-only-feature");
+
+  const conn = createConnection(deps, github, azure);
+  await runSyncForConnection(deps, conn.id);
+
+  const { winningSha } = await resolveConflict(deps, conn.id, "refs/heads/azure-only-feature", "azure");
+
+  assert.equal(winningSha, featureSha);
+  assert.equal(revParse(github, "refs/heads/azure-only-feature"), featureSha);
+});
+
+test("brand-new Azure-only branch: rejecting deletes it from Azure DevOps", async () => {
+  const deps = createDeps();
+  const github = fx.makeBareRepo();
+  const azure = fx.makeBareRepo();
+  const work = fx.makeWorkTree();
+
+  fx.commitFile(work, "base");
+  fx.push(work, github, "main");
+  fx.push(work, azure, "main");
+  sh("-C", work, "checkout", "-b", "azure-only-feature");
+  fx.commitFile(work, "azure-only-work");
+  fx.push(work, azure, "azure-only-feature");
+
+  const conn = createConnection(deps, github, azure);
+  await runSyncForConnection(deps, conn.id);
+
+  const { winningSha } = await resolveConflict(deps, conn.id, "refs/heads/azure-only-feature", "github");
+
+  assert.equal(winningSha, null);
+  assert.equal(revParse(azure, "refs/heads/azure-only-feature"), null);
+  assert.equal(revParse(github, "refs/heads/azure-only-feature"), null);
+});
+
+test("GitHub-side branch deletion propagates to Azure DevOps automatically", async () => {
+  const deps = createDeps();
+  const github = fx.makeBareRepo();
+  const azure = fx.makeBareRepo();
+  const work = fx.makeWorkTree();
+
+  fx.commitFile(work, "base");
+  fx.push(work, github, "main");
+  fx.push(work, azure, "main");
+  sh("-C", work, "checkout", "-b", "feature");
   fx.push(work, github, "feature");
   fx.push(work, azure, "feature");
 
@@ -254,14 +309,43 @@ test("branch deletion propagates only after a prior successful sync, never on fi
   const first = await runSyncForConnection(deps, conn.id);
   assert.equal(first.status, "ok");
 
-  // Delete the "feature" branch on GitHub only.
-  require("node:child_process").execFileSync("git", ["-C", github, "branch", "-D", "feature"]);
+  sh("-C", github, "branch", "-D", "feature");
 
   const second = await runSyncForConnection(deps, conn.id);
   assert.equal(second.status, "ok");
   const item = second.plan.find((p) => p.refName === "refs/heads/feature");
-  assert.equal(item?.decision.kind, "delete");
+  assert.equal(item?.decision.kind, "delete-on-azure");
   assert.equal(revParse(azure, "refs/heads/feature"), null);
+});
+
+test("Azure-side branch deletion does NOT propagate to GitHub - GitHub's copy is re-pushed instead", async () => {
+  const deps = createDeps();
+  const github = fx.makeBareRepo();
+  const azure = fx.makeBareRepo();
+  const work = fx.makeWorkTree();
+
+  fx.commitFile(work, "base");
+  fx.push(work, github, "main");
+  fx.push(work, azure, "main");
+  sh("-C", work, "checkout", "-b", "feature");
+  const featureSha = fx.commitFile(work, "feature-work");
+  fx.push(work, github, "feature");
+  fx.push(work, azure, "feature");
+
+  const conn = createConnection(deps, github, azure);
+  const first = await runSyncForConnection(deps, conn.id);
+  assert.equal(first.status, "ok");
+
+  // Someone deletes "feature" on Azure DevOps only. GitHub still has it.
+  sh("-C", azure, "branch", "-D", "feature");
+
+  const second = await runSyncForConnection(deps, conn.id);
+  assert.equal(second.status, "ok");
+  const item = second.plan.find((p) => p.refName === "refs/heads/feature");
+  assert.equal(item?.decision.kind, "push-to-azure");
+  // GitHub still has it, and it's been recreated on Azure DevOps to match.
+  assert.equal(revParse(github, "refs/heads/feature"), featureSha);
+  assert.equal(revParse(azure, "refs/heads/feature"), featureSha);
 });
 
 test("tag creation propagates to the side missing it", async () => {
@@ -270,21 +354,21 @@ test("tag creation propagates to the side missing it", async () => {
   const azure = fx.makeBareRepo();
   const work = fx.makeWorkTree();
 
-  const sha1 = fx.commitFile(work, "v1", "2023-01-01T00:00:00Z");
+  const sha1 = fx.commitFile(work, "v1");
   fx.push(work, github, "main");
   fx.tagAt(work, "v1.0.0", sha1);
-  require("node:child_process").execFileSync("git", ["-C", work, "push", "-f", github, "v1.0.0"]);
+  sh("-C", work, "push", "-f", github, "v1.0.0");
 
   const conn = createConnection(deps, github, azure);
   const result = await runSyncForConnection(deps, conn.id);
 
   assert.equal(result.status, "ok");
   const tagItem = result.plan.find((p) => p.refName === "refs/tags/v1.0.0");
-  assert.equal(tagItem?.decision.kind, "create");
+  assert.equal(tagItem?.decision.kind, "push-to-azure");
   assert.equal(revParse(azure, "refs/tags/v1.0.0"), sha1);
 });
 
-test("a moved tag that diverges also pauses as a pending conflict instead of auto-resolving", async () => {
+test("a moved tag where Azure is ahead also pauses as azure-ahead", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
@@ -294,27 +378,26 @@ test("a moved tag that diverges also pauses as a pending conflict instead of aut
   fx.push(work, github, "main");
   fx.push(work, azure, "main");
 
-  const shaA = fx.commitFile(work, "tag-target-a", "2021-01-01T00:00:00Z");
-  fx.tagAt(work, "v1.0.0", shaA);
-  require("node:child_process").execFileSync("git", ["-C", work, "push", "-f", github, "v1.0.0"]);
+  fx.tagAt(work, "v1.0.0", base);
+  sh("-C", work, "push", "-f", github, "v1.0.0");
+  sh("-C", work, "push", "-f", azure, "v1.0.0");
 
-  fx.resetHard(work, base);
-  const shaB = fx.commitFile(work, "tag-target-b", "2022-01-01T00:00:00Z");
-  fx.tagAt(work, "v1.0.0", shaB);
-  require("node:child_process").execFileSync("git", ["-C", work, "push", "-f", azure, "v1.0.0"]);
+  const moved = fx.commitFile(work, "tag-moved-on-azure");
+  fx.tagAt(work, "v1.0.0", moved);
+  sh("-C", work, "push", "-f", azure, "v1.0.0");
 
   const conn = createConnection(deps, github, azure);
   const result = await runSyncForConnection(deps, conn.id);
 
   assert.equal(result.status, "conflict");
   const tagItem = result.plan.find((p) => p.refName === "refs/tags/v1.0.0");
-  assert.equal(tagItem?.decision.kind, "manual-conflict");
-  assert.equal(revParse(github, "refs/tags/v1.0.0"), shaA);
-  assert.equal(revParse(azure, "refs/tags/v1.0.0"), shaB);
+  assert.equal(tagItem?.decision.kind, "azure-ahead");
+  assert.equal(revParse(github, "refs/tags/v1.0.0"), base);
+  assert.equal(revParse(azure, "refs/tags/v1.0.0"), moved);
 
   const { winningSha } = await resolveConflict(deps, conn.id, "refs/tags/v1.0.0", "azure");
-  assert.equal(winningSha, shaB);
-  assert.equal(revParse(github, "refs/tags/v1.0.0"), shaB);
+  assert.equal(winningSha, moved);
+  assert.equal(revParse(github, "refs/tags/v1.0.0"), moved);
 });
 
 test("scheduler mutex: a manual trigger while a run is in-flight awaits the same run instead of starting a second one", async () => {

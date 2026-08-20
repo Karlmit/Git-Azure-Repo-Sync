@@ -1,14 +1,15 @@
 # gitsync — GitHub ⇄ Azure DevOps Repo Sync
 
-Keeps a GitHub repo and an Azure DevOps Repos repo in sync in both directions, for as
-many repo pairs ("connections") as you want, with a small web GUI to manage
-connections and watch sync logs.
+Keeps a GitHub repo and an Azure DevOps Repos repo in sync, for as many repo pairs
+("connections") as you want, with a small web GUI to manage connections and watch
+sync logs. **GitHub is treated as the source of truth** — Azure DevOps is meant to
+mirror it, and anything Azure DevOps has that GitHub doesn't requires your explicit
+approval before it touches anything (see "How syncing works" below).
 
 - Polls both sides on a configurable interval per connection (no webhooks, no inbound
   exposure required).
-- Fast-forwards cleanly when one side is simply behind; if the two sides have
-  genuinely diverged, sync pauses on that ref and asks you to pick a side from the
-  GUI instead of guessing (see "How conflicts are handled" below).
+- Pushes GitHub → Azure DevOps automatically whenever GitHub is ahead. Pauses and
+  asks you to decide whenever Azure DevOps has changes GitHub doesn't.
 - Single Docker image, single SQLite file + local git mirrors on one volume, PATs
   encrypted at rest, single-user login for the GUI.
 
@@ -128,29 +129,41 @@ npm test
    Release with auto-generated notes. No secrets need to be configured — it uses the
    automatically provided `GITHUB_TOKEN`.
 
-## How conflicts are handled
+## How syncing works
 
-For each branch/tag, on every poll:
+GitHub is authoritative. For each branch/tag, on every poll:
 
-- If one side is a clean fast-forward of the other, it's fast-forwarded automatically
-  — no data at risk, so no confirmation needed.
-- If the two sides have genuinely diverged (including totally unrelated histories —
-  e.g. a brand-new Azure DevOps repo that auto-created an initial commit when it was
-  created), **nothing is pushed automatically**. That ref is left exactly as-is on
-  both sides, the connection's status flips to `conflict`, and it shows up under
-  "Needs your decision" on the connection's detail page with both sides' commit
-  (SHA, timestamp, message) side by side. You pick which one to keep; only then does
-  it force-push your choice over the other side. If the two sides resolve themselves
-  on their own before you get to it (e.g. someone fast-forwards one onto the other
-  outside gitsync), the pending conflict just disappears on the next poll — nothing
-  to clean up.
+- **If GitHub is ahead or equal, Azure DevOps is updated automatically** — this
+  covers a new commit, a brand-new GitHub branch, or GitHub deleting a branch it
+  used to have (that deletion propagates to Azure DevOps too). No confirmation
+  needed, since nothing on Azure DevOps is ever at risk of being lost this way.
+- **If Azure DevOps has anything GitHub doesn't — nothing is pushed automatically.**
+  This covers three cases, all treated identically: Azure DevOps is cleanly ahead
+  (someone pushed there directly while you were working from GitHub), the two sides
+  have truly diverged (including totally unrelated histories — e.g. a brand-new
+  Azure DevOps repo that auto-created its own initial commit), or a branch exists
+  only on Azure DevOps and has never been seen before. In every case, that ref is
+  left exactly as-is on both sides, the connection's status flips to `conflict`, and
+  it shows up under "Needs your decision" on the connection's detail page with both
+  sides' commit (SHA, timestamp, message) shown side by side. You choose: **pull
+  Azure DevOps's version into GitHub**, or **discard it and push GitHub's version
+  over it** (which deletes the ref from Azure DevOps if GitHub never had it at all).
+  Only then does anything get pushed. If the two sides resolve themselves before you
+  get to it (e.g. someone fast-forwards one onto the other outside gitsync), the
+  pending conflict just disappears on the next poll — nothing to clean up.
+- **Azure DevOps-side deletions never propagate to GitHub.** If Azure DevOps loses a
+  branch that GitHub still has (accidentally or otherwise), GitHub's copy is simply
+  re-pushed to recreate it — GitHub's state can never shrink because of something
+  that happened on Azure DevOps.
 
-This was a deliberate design choice after an early version auto-resolved divergence
-by picking whichever side had the most recent commit timestamp — which sounds
-reasonable until one side is a freshly created, essentially-empty repo whose
-auto-generated initial commit is *chronologically newer* than real work sitting on
-the other side. Timestamps alone can't tell "real work" from "placeholder commit",
-so gitsync no longer guesses — a human always makes that call from the GUI.
+This direction was a deliberate design choice after an early version auto-resolved
+divergence by picking whichever side had the most recent commit *timestamp* —
+which sounds reasonable until one side is a freshly created, essentially-empty repo
+whose auto-generated initial commit is chronologically newer than real work sitting
+on the other side. Timestamps can't tell "real work" from "placeholder commit," and
+a purely symmetric model has no natural notion of which side to trust more, so
+gitsync now treats GitHub as ground truth and never silently discards anything from
+it — a human always makes that call for anything arriving from Azure DevOps.
 
 ## Security notes
 

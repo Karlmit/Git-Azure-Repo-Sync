@@ -86,9 +86,10 @@ export interface PendingConflictRow {
   connectionId: string;
   refName: string;
   isTag: boolean;
-  githubSha: string;
+  /** Null if this ref has only ever existed on Azure DevOps. */
+  githubSha: string | null;
   azureSha: string;
-  githubCommitDate: string;
+  githubCommitDate: string | null;
   azureCommitDate: string;
   githubSummary: string | null;
   azureSummary: string | null;
