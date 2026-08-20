@@ -44,10 +44,25 @@ connections and watch sync logs.
      gitsync-data:
        driver: local
    ```
-3. Copy `.env.example` to `.env` in the same folder and fill in real values:
+3. In that **same folder**, create a file named `.env` next to `docker-compose.yml`
+   (`docker-compose.yml` won't start without it — `env_file: [.env]` expects it to
+   exist there). It needs exactly these three keys:
+   ```
+   APP_USERNAME=choose-a-username
+   APP_PASSWORD=choose-a-strong-password
+   ENCRYPTION_KEY=paste-the-output-of-the-command-below-here
+   ```
    - `APP_USERNAME` / `APP_PASSWORD` — login for the gitsync web GUI.
-   - `ENCRYPTION_KEY` — generate with `openssl rand -base64 32`. This encrypts the
-     GitHub/Azure DevOps PATs you'll enter later, at rest in the SQLite database.
+   - `ENCRYPTION_KEY` — a 32-byte key, base64-encoded. Generate one with:
+     ```
+     openssl rand -base64 32
+     ```
+     This encrypts the GitHub/Azure DevOps PATs you'll enter later, at rest in the
+     SQLite database. Paste the exact output as the value, with no extra quotes.
+
+   (If you'd rather start from the repo's own template instead of typing the above
+   by hand: `curl -O https://raw.githubusercontent.com/Karlmit/Git-Azure-Repo-Sync/main/.env.example`,
+   then `mv .env.example .env` and fill in the placeholders.)
 4. From that folder, run:
    ```
    docker compose up -d
