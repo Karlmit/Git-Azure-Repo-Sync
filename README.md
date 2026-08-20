@@ -44,6 +44,18 @@ connections and watch sync logs.
      gitsync-data:
        driver: local
    ```
+   The container runs as a non-root user (uid 1000), which the named volume above
+   handles for you automatically. If you'd rather use a bind mount to a folder you
+   can browse directly (common on Unraid, e.g. swapping the `volumes:` line for
+   `- /mnt/user/appdata/gitsync-data:/data`), that host folder must be owned by uid
+   1000 **before** you start the container, or the app crashes on startup with
+   `SqliteError: unable to open database file (SQLITE_CANTOPEN)`:
+   ```
+   mkdir -p /mnt/user/appdata/gitsync-data
+   chown -R 1000:1000 /mnt/user/appdata/gitsync-data
+   ```
+   If you already hit that error, running the `chown` above and then
+   `docker compose up -d` again fixes it — no need to delete anything.
 3. In that **same folder**, create a file named `.env` next to `docker-compose.yml`
    (`docker-compose.yml` won't start without it — `env_file: [.env]` expects it to
    exist there). It needs exactly these three keys:
