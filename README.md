@@ -15,8 +15,11 @@ connections and watch sync logs.
 ## Running it on Unraid
 
 1. Create a folder for this app's config, e.g. `/mnt/user/appdata/gitsync/`.
-2. Copy `docker-compose.yml` from this repo into that folder (reproduced here for
-   reference):
+2. Create `docker-compose.yml` in that folder with the contents below. This uses a
+   bind mount to `/mnt/user/appdata/GithubAzureSync` for the app's data — change that
+   path if you'd rather use a different folder, or swap it for a Docker-managed named
+   volume like the one in the repo's own `docker-compose.yml` if you don't need to
+   browse the data directly:
    ```yaml
    services:
      gitsync:
@@ -35,25 +38,21 @@ connections and watch sync logs.
          PUID: "${PUID:-1000}"
          PGID: "${PGID:-1000}"
        volumes:
-         - gitsync-data:/data
+         - /mnt/user/appdata/GithubAzureSync:/data
        healthcheck:
          test: ["CMD", "node", "-e", "fetch('http://localhost:3012/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
          interval: 30s
          timeout: 5s
          retries: 3
-
-   volumes:
-     gitsync-data:
-       driver: local
    ```
-   Feel free to swap the `volumes:` line for a bind mount to a folder you can browse
-   directly instead of a Docker-managed named volume, e.g.
-   `- /mnt/user/appdata/gitsync-data:/data` — the container starts as root, `chown`s
-   that folder to `PUID:PGID`, then drops to that user before running anything, so it
-   works regardless of what the folder was owned by beforehand. `PUID`/`PGID` default
-   to `1000:1000`; on Unraid you can set them to `99`/`100` in your `.env` (below) to
-   match the `nobody:users` ownership your other shares already use, if you'd prefer
-   that instead.
+   This bind-mounts `/mnt/user/appdata/GithubAzureSync` directly rather than using a
+   Docker-managed named volume, so you can browse the SQLite database and git mirrors
+   from the Unraid file browser. The container starts as root, `chown`s that folder to
+   `PUID:PGID`, then drops to that user before running anything — so it works
+   regardless of what the folder was owned by beforehand, no manual `chown` needed.
+   `PUID`/`PGID` default to `1000:1000`; set them to `99`/`100` in your `.env` (below)
+   instead if you'd rather match the `nobody:users` ownership your other shares
+   already use.
 3. In that **same folder**, create a file named `.env` next to `docker-compose.yml`
    (`docker-compose.yml` won't start without it — `env_file: [.env]` expects it to
    exist there). It needs exactly these three keys:
