@@ -32,6 +32,8 @@ connections and watch sync logs.
          HOST: "0.0.0.0"
          DB_PATH: "/data/app.db"
          MIRROR_ROOT: "/data/mirrors"
+         PUID: "${PUID:-1000}"
+         PGID: "${PGID:-1000}"
        volumes:
          - gitsync-data:/data
        healthcheck:
@@ -44,18 +46,14 @@ connections and watch sync logs.
      gitsync-data:
        driver: local
    ```
-   The container runs as a non-root user (uid 1000), which the named volume above
-   handles for you automatically. If you'd rather use a bind mount to a folder you
-   can browse directly (common on Unraid, e.g. swapping the `volumes:` line for
-   `- /mnt/user/appdata/gitsync-data:/data`), that host folder must be owned by uid
-   1000 **before** you start the container, or the app crashes on startup with
-   `SqliteError: unable to open database file (SQLITE_CANTOPEN)`:
-   ```
-   mkdir -p /mnt/user/appdata/gitsync-data
-   chown -R 1000:1000 /mnt/user/appdata/gitsync-data
-   ```
-   If you already hit that error, running the `chown` above and then
-   `docker compose up -d` again fixes it — no need to delete anything.
+   Feel free to swap the `volumes:` line for a bind mount to a folder you can browse
+   directly instead of a Docker-managed named volume, e.g.
+   `- /mnt/user/appdata/gitsync-data:/data` — the container starts as root, `chown`s
+   that folder to `PUID:PGID`, then drops to that user before running anything, so it
+   works regardless of what the folder was owned by beforehand. `PUID`/`PGID` default
+   to `1000:1000`; on Unraid you can set them to `99`/`100` in your `.env` (below) to
+   match the `nobody:users` ownership your other shares already use, if you'd prefer
+   that instead.
 3. In that **same folder**, create a file named `.env` next to `docker-compose.yml`
    (`docker-compose.yml` won't start without it — `env_file: [.env]` expects it to
    exist there). It needs exactly these three keys:
@@ -71,6 +69,9 @@ connections and watch sync logs.
      ```
      This encrypts the GitHub/Azure DevOps PATs you'll enter later, at rest in the
      SQLite database. Paste the exact output as the value, with no extra quotes.
+
+   Optionally add `PUID=99` and `PGID=100` if you're using a bind mount and want it
+   owned by Unraid's usual `nobody:users` instead of the `1000:1000` default.
 
    (If you'd rather start from the repo's own template instead of typing the above
    by hand: `curl -O https://raw.githubusercontent.com/Karlmit/Git-Azure-Repo-Sync/main/.env.example`,
