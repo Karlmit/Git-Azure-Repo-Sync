@@ -81,3 +81,16 @@ export interface RefStateRow {
   azureSha: string | null;
   updatedAt: string;
 }
+
+export interface PendingConflictRow {
+  connectionId: string;
+  refName: string;
+  isTag: boolean;
+  githubSha: string;
+  azureSha: string;
+  githubCommitDate: string;
+  azureCommitDate: string;
+  githubSummary: string | null;
+  azureSummary: string | null;
+  detectedAt: string;
+}

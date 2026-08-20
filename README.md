@@ -7,8 +7,8 @@ connections and watch sync logs.
 - Polls both sides on a configurable interval per connection (no webhooks, no inbound
   exposure required).
 - Fast-forwards cleanly when one side is simply behind; if the two sides have
-  genuinely diverged, it force-pushes whichever side has the most recent commit over
-  the other and logs it clearly (last-write-wins, by design — see below).
+  genuinely diverged, sync pauses on that ref and asks you to pick a side from the
+  GUI instead of guessing (see "How conflicts are handled" below).
 - Single Docker image, single SQLite file + local git mirrors on one volume, PATs
   encrypted at rest, single-user login for the GUI.
 
@@ -132,16 +132,25 @@ npm test
 
 For each branch/tag, on every poll:
 
-- If one side is a clean fast-forward of the other, it's fast-forwarded — no data
-  loss possible.
-- If the two sides have diverged (including totally unrelated histories), whichever
-  side has the more recently committed change wins and is force-pushed over the
-  other side. This is logged as a `FORCE-OVERWRITE` entry in that connection's log,
-  naming which side won and why, so it's never silent.
+- If one side is a clean fast-forward of the other, it's fast-forwarded automatically
+  — no data at risk, so no confirmation needed.
+- If the two sides have genuinely diverged (including totally unrelated histories —
+  e.g. a brand-new Azure DevOps repo that auto-created an initial commit when it was
+  created), **nothing is pushed automatically**. That ref is left exactly as-is on
+  both sides, the connection's status flips to `conflict`, and it shows up under
+  "Needs your decision" on the connection's detail page with both sides' commit
+  (SHA, timestamp, message) side by side. You pick which one to keep; only then does
+  it force-push your choice over the other side. If the two sides resolve themselves
+  on their own before you get to it (e.g. someone fast-forwards one onto the other
+  outside gitsync), the pending conflict just disappears on the next poll — nothing
+  to clean up.
 
-This is intentionally simple rather than attempting an automatic merge. If you need
-finer-grained conflict resolution, treat a `conflict` status badge as a signal to go
-look at the log and reconcile manually before it happens again.
+This was a deliberate design choice after an early version auto-resolved divergence
+by picking whichever side had the most recent commit timestamp — which sounds
+reasonable until one side is a freshly created, essentially-empty repo whose
+auto-generated initial commit is *chronologically newer* than real work sitting on
+the other side. Timestamps alone can't tell "real work" from "placeholder commit",
+so gitsync no longer guesses — a human always makes that call from the GUI.
 
 ## Security notes
 

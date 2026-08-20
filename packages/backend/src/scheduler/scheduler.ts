@@ -1,23 +1,48 @@
 import type { Connection } from "../models/types";
 import type { SyncEngineDeps } from "../sync/engine";
 import { runSyncForConnection } from "../sync/engine";
+import { resolveConflict, type ConflictWinner } from "../sync/resolveConflict";
 import type { SyncResult } from "../sync/types";
 
 export class Scheduler {
   private timers = new Map<string, NodeJS.Timeout>();
   private running = new Map<string, Promise<SyncResult>>();
+  private resolving = new Set<string>();
 
   constructor(private deps: SyncEngineDeps) {}
 
   async triggerSync(connectionId: string): Promise<SyncResult> {
     const existing = this.running.get(connectionId);
     if (existing) return existing;
+    if (this.resolving.has(connectionId)) {
+      throw new Error("A conflict resolution is currently in progress for this connection - try again in a moment.");
+    }
 
     const runPromise = runSyncForConnection(this.deps, connectionId).finally(() => {
       this.running.delete(connectionId);
     });
     this.running.set(connectionId, runPromise);
     return runPromise;
+  }
+
+  async resolveConflict(
+    connectionId: string,
+    refName: string,
+    winner: ConflictWinner,
+  ): Promise<{ winningSha: string }> {
+    if (this.running.has(connectionId)) {
+      throw new Error("A sync is currently in progress for this connection - try again in a moment.");
+    }
+    if (this.resolving.has(connectionId)) {
+      throw new Error("Another conflict resolution is already in progress for this connection.");
+    }
+
+    this.resolving.add(connectionId);
+    try {
+      return await resolveConflict(this.deps, connectionId, refName, winner);
+    } finally {
+      this.resolving.delete(connectionId);
+    }
   }
 
   scheduleConnection(conn: Connection): void {

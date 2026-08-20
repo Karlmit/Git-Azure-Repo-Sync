@@ -4,7 +4,13 @@ export type RefDecision =
   | { kind: "noop" }
   | { kind: "create"; direction: Direction; sha: string }
   | { kind: "fast-forward"; direction: Direction; fromSha: string | null; toSha: string }
-  | { kind: "force-overwrite"; direction: Direction; winningSha: string; losingSha: string; reason: string }
+  | {
+      kind: "manual-conflict";
+      githubSha: string;
+      azureSha: string;
+      githubCommitDate: string;
+      azureCommitDate: string;
+    }
   | { kind: "delete"; direction: Direction; sha: string };
 
 export interface RefDecisionInput {

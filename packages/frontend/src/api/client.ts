@@ -55,6 +55,46 @@ export interface CreateConnectionInput {
 
 export type UpdateConnectionInput = Partial<CreateConnectionInput> & { enabled?: boolean };
 
+export type RefDecisionKind = "noop" | "create" | "fast-forward" | "manual-conflict" | "delete";
+
+export interface SyncPlanItem {
+  refName: string;
+  isTag: boolean;
+  decision: { kind: RefDecisionKind; [key: string]: unknown };
+}
+
+export interface SyncOutcome {
+  connectionId: string;
+  status: "ok" | "conflict" | "error";
+  plan: SyncPlanItem[];
+  error?: string;
+}
+
+export interface PendingConflict {
+  connectionId: string;
+  refName: string;
+  isTag: boolean;
+  githubSha: string;
+  azureSha: string;
+  githubCommitDate: string;
+  azureCommitDate: string;
+  githubSummary: string | null;
+  azureSummary: string | null;
+  detectedAt: string;
+}
+
+export type ConflictWinner = "github" | "azure";
+
+export interface TestAccessResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface TestConnectionResult {
+  github: TestAccessResult;
+  azure: TestAccessResult;
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -99,7 +139,7 @@ export const api = {
   deleteConnection: (id: string) => request<void>(`/connections/${id}`, { method: "DELETE" }),
   pauseConnection: (id: string) => request<ConnectionPublic>(`/connections/${id}/pause`, { method: "POST" }),
   resumeConnection: (id: string) => request<ConnectionPublic>(`/connections/${id}/resume`, { method: "POST" }),
-  syncNow: (id: string) => request<unknown>(`/connections/${id}/sync-now`, { method: "POST" }),
+  syncNow: (id: string) => request<SyncOutcome>(`/connections/${id}/sync-now`, { method: "POST" }),
 
   listLogs: (id: string, opts: { cursor?: number; limit?: number; level?: string } = {}) => {
     const params = new URLSearchParams();
@@ -109,4 +149,22 @@ export const api = {
     const qs = params.toString();
     return request<LogsPage>(`/connections/${id}/logs${qs ? `?${qs}` : ""}`);
   },
+
+  listConflicts: (id: string) => request<PendingConflict[]>(`/connections/${id}/conflicts`),
+  resolveConflict: (id: string, refName: string, winner: ConflictWinner) =>
+    request<{ winningSha: string }>(`/connections/${id}/conflicts/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ refName, winner }),
+    }),
+
+  testNewConnection: (input: {
+    githubUrl: string;
+    githubPat: string;
+    azureOrg: string;
+    azureProject: string;
+    azureRepo: string;
+    azurePat: string;
+  }) => request<TestConnectionResult>("/connections/test", { method: "POST", body: JSON.stringify(input) }),
+  testExistingConnection: (id: string, overrides: { githubPat?: string; azurePat?: string }) =>
+    request<TestConnectionResult>(`/connections/${id}/test`, { method: "POST", body: JSON.stringify(overrides) }),
 };

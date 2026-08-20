@@ -4,6 +4,7 @@ import { runMigrations } from "./db/migrate";
 import { ConnectionsRepo } from "./models/connections.repo";
 import { SyncLogsRepo } from "./models/syncLogs.repo";
 import { RefStateRepo } from "./models/refState.repo";
+import { PendingConflictsRepo } from "./models/pendingConflicts.repo";
 import { Scheduler } from "./scheduler/scheduler";
 import { buildApp } from "./app";
 
@@ -16,11 +17,13 @@ async function main() {
   const connectionsRepo = new ConnectionsRepo(db, encryptionKey);
   const syncLogsRepo = new SyncLogsRepo(db, env.LOG_MAX_ROWS_PER_CONNECTION, env.LOG_RETENTION_DAYS);
   const refStateRepo = new RefStateRepo(db);
+  const pendingConflictsRepo = new PendingConflictsRepo(db);
 
   const scheduler = new Scheduler({
     connectionsRepo,
     syncLogsRepo,
     refStateRepo,
+    pendingConflictsRepo,
     mirrorRoot: env.MIRROR_ROOT,
     encryptionKey,
   });
@@ -28,8 +31,10 @@ async function main() {
   const app = buildApp({
     connectionsRepo,
     syncLogsRepo,
+    pendingConflictsRepo,
     scheduler,
     mirrorRoot: env.MIRROR_ROOT,
+    encryptionKey,
     appUsername: env.APP_USERNAME,
     appPassword: env.APP_PASSWORD,
     version: env.APP_VERSION,

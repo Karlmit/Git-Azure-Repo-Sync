@@ -8,8 +8,10 @@ import { isValidSession, SESSION_COOKIE_NAME } from "./auth/session";
 import { registerHealthRoutes } from "./routes/health.routes";
 import { registerConnectionsRoutes } from "./routes/connections.routes";
 import { registerLogsRoutes } from "./routes/logs.routes";
+import { registerConflictsRoutes } from "./routes/conflicts.routes";
 import type { ConnectionsRepo } from "./models/connections.repo";
 import type { SyncLogsRepo } from "./models/syncLogs.repo";
+import type { PendingConflictsRepo } from "./models/pendingConflicts.repo";
 import type { Scheduler } from "./scheduler/scheduler";
 
 const PUBLIC_PATHS = new Set(["/api/login", "/api/health", "/api/version"]);
@@ -17,8 +19,10 @@ const PUBLIC_PATHS = new Set(["/api/login", "/api/health", "/api/version"]);
 export interface BuildAppOpts {
   connectionsRepo: ConnectionsRepo;
   syncLogsRepo: SyncLogsRepo;
+  pendingConflictsRepo: PendingConflictsRepo;
   scheduler: Scheduler;
   mirrorRoot: string;
+  encryptionKey: Buffer;
   appUsername: string;
   appPassword: string;
   version: string;
@@ -46,8 +50,10 @@ export function buildApp(opts: BuildAppOpts): FastifyInstance {
     connectionsRepo: opts.connectionsRepo,
     scheduler: opts.scheduler,
     mirrorRoot: opts.mirrorRoot,
+    encryptionKey: opts.encryptionKey,
   });
   registerLogsRoutes(app, { syncLogsRepo: opts.syncLogsRepo });
+  registerConflictsRoutes(app, { pendingConflictsRepo: opts.pendingConflictsRepo, scheduler: opts.scheduler });
 
   const distDir = opts.frontendDistDir ?? join(__dirname, "../../frontend/dist");
   if (existsSync(distDir)) {

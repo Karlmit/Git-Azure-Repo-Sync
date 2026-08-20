@@ -5,16 +5,56 @@ import { StatusBadge } from "../components/StatusBadge";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useConnections } from "../hooks/useConnections";
 
+type ActionMessage = { kind: "success" | "warn" | "error"; text: string };
+
+const BANNER_STYLE: Record<ActionMessage["kind"], { bg: string; fg: string }> = {
+  success: { bg: "#dcfce7", fg: "#166534" },
+  warn: { bg: "#fef3c7", fg: "#92400e" },
+  error: { bg: "#fee2e2", fg: "#991b1b" },
+};
+
 export function ConnectionsListPage() {
   const { data: connections, refresh } = useConnections();
   const [pendingDelete, setPendingDelete] = useState<ConnectionPublic | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [message, setMessage] = useState<ActionMessage | null>(null);
 
-  const withBusy = async (id: string, action: () => Promise<unknown>) => {
+  const withBusy = async (id: string, action: () => Promise<unknown>, successText: string) => {
     setBusyId(id);
+    setMessage(null);
     try {
       await action();
       await refresh();
+      setMessage({ kind: "success", text: successText });
+    } catch (err) {
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : "Action failed." });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSyncNow = async (conn: ConnectionPublic) => {
+    setBusyId(conn.id);
+    setMessage(null);
+    try {
+      const result = await api.syncNow(conn.id);
+      await refresh();
+      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "manual-conflict");
+      const conflictCount = result.plan.filter((p) => p.decision.kind === "manual-conflict").length;
+      if (result.status === "error") {
+        setMessage({ kind: "error", text: `${conn.name}: sync failed - ${result.error ?? "see its logs"}` });
+      } else if (conflictCount > 0) {
+        setMessage({
+          kind: "warn",
+          text: `${conn.name}: ${conflictCount} ref${conflictCount === 1 ? "" : "s"} diverged - open the connection to decide which side to keep.`,
+        });
+      } else if (changed.length === 0) {
+        setMessage({ kind: "success", text: `${conn.name}: already up to date.` });
+      } else {
+        setMessage({ kind: "success", text: `${conn.name}: synced (${changed.length} ref${changed.length === 1 ? "" : "s"} updated).` });
+      }
+    } catch (err) {
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : "Sync request failed." });
     } finally {
       setBusyId(null);
     }
@@ -28,6 +68,20 @@ export function ConnectionsListPage() {
           <button>+ Add Connection</button>
         </Link>
       </div>
+
+      {message && (
+        <div
+          style={{
+            padding: "8px 12px",
+            marginBottom: 16,
+            borderRadius: 4,
+            background: BANNER_STYLE[message.kind].bg,
+            color: BANNER_STYLE[message.kind].fg,
+          }}
+        >
+          {message.text}
+        </div>
+      )}
 
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
@@ -55,15 +109,21 @@ export function ConnectionsListPage() {
               <td style={{ padding: 8 }}>{conn.pollIntervalSeconds}s</td>
               <td style={{ padding: 8 }}>{conn.enabled ? "yes" : "paused"}</td>
               <td style={{ padding: 8, display: "flex", gap: 6 }}>
-                <button disabled={busyId === conn.id} onClick={() => withBusy(conn.id, () => api.syncNow(conn.id))}>
-                  Sync now
+                <button disabled={busyId === conn.id} onClick={() => handleSyncNow(conn)}>
+                  {busyId === conn.id ? "Syncing…" : "Sync now"}
                 </button>
                 {conn.enabled ? (
-                  <button disabled={busyId === conn.id} onClick={() => withBusy(conn.id, () => api.pauseConnection(conn.id))}>
+                  <button
+                    disabled={busyId === conn.id}
+                    onClick={() => withBusy(conn.id, () => api.pauseConnection(conn.id), `${conn.name} paused.`)}
+                  >
                     Pause
                   </button>
                 ) : (
-                  <button disabled={busyId === conn.id} onClick={() => withBusy(conn.id, () => api.resumeConnection(conn.id))}>
+                  <button
+                    disabled={busyId === conn.id}
+                    onClick={() => withBusy(conn.id, () => api.resumeConnection(conn.id), `${conn.name} resumed.`)}
+                  >
                     Resume
                   </button>
                 )}
@@ -87,9 +147,16 @@ export function ConnectionsListPage() {
         onCancel={() => setPendingDelete(null)}
         onConfirm={async () => {
           if (!pendingDelete) return;
-          await api.deleteConnection(pendingDelete.id);
-          setPendingDelete(null);
-          await refresh();
+          const name = pendingDelete.name;
+          try {
+            await api.deleteConnection(pendingDelete.id);
+            setMessage({ kind: "success", text: `${name} deleted.` });
+          } catch (err) {
+            setMessage({ kind: "error", text: err instanceof Error ? err.message : "Failed to delete connection." });
+          } finally {
+            setPendingDelete(null);
+            await refresh();
+          }
         }}
       />
     </div>

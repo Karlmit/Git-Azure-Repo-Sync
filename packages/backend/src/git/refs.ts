@@ -39,3 +39,12 @@ export async function commitDate(mirrorDir: string, sha: string): Promise<string
   const { stdout } = await runGit(["log", "-1", "--format=%cI", sha], { cwd: mirrorDir, timeoutMs: 30_000 });
   return stdout.trim();
 }
+
+export async function commitSummary(mirrorDir: string, sha: string): Promise<string | null> {
+  try {
+    const { stdout } = await runGit(["log", "-1", "--format=%s", sha], { cwd: mirrorDir, timeoutMs: 30_000 });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}

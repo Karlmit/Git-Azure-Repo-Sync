@@ -3,22 +3,24 @@ import { buildAuthUrl } from "../git/credentialUrl";
 import { classifyGitError } from "../git/classify";
 import { runGit } from "../git/exec";
 import { ensureMirrorExists, mirrorPath } from "../git/mirror";
-import { commitDate, isAncestor, listRefs } from "../git/refs";
+import { commitDate, commitSummary, isAncestor, listRefs } from "../git/refs";
 import type { ConnectionsRepo } from "../models/connections.repo";
 import type { SyncLogsRepo } from "../models/syncLogs.repo";
 import type { RefStateRepo } from "../models/refState.repo";
+import type { PendingConflictsRepo } from "../models/pendingConflicts.repo";
 import { decideRef } from "./branchPlan";
-import type { Direction, PlanItem, RefDecision, SyncPlan, SyncResult } from "./types";
+import type { Direction, PlanItem, SyncPlan, SyncResult } from "./types";
 
 export interface SyncEngineDeps {
   connectionsRepo: ConnectionsRepo;
   syncLogsRepo: SyncLogsRepo;
   refStateRepo: RefStateRepo;
+  pendingConflictsRepo: PendingConflictsRepo;
   mirrorRoot: string;
   encryptionKey: Buffer;
 }
 
-interface Urls {
+export interface Urls {
   githubAuthUrl: string;
   azureAuthUrl: string;
   githubToken: string;
@@ -111,13 +113,10 @@ async function applyDecision(mirrorDir: string, item: PlanItem, urls: Urls): Pro
       return;
     }
 
-    case "force-overwrite": {
-      await runGit(
-        ["push", "--force", targetUrlFor(decision.direction), `${decision.winningSha}:${refPrefix}/${shortName}`],
-        { cwd: mirrorDir, timeoutMs: 60_000, secrets },
-      );
+    case "manual-conflict":
+      // Never auto-applied - handled separately in the main loop by recording a
+      // pending conflict instead of pushing anything.
       return;
-    }
 
     case "delete": {
       await runGit(["push", targetUrlFor(decision.direction), `:${refPrefix}/${shortName}`], {
@@ -198,7 +197,8 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
     const plan: SyncPlan = [...branchPlan, ...tagPlan];
 
     let hadBranchError = false;
-    let hadForceOverwrite = false;
+    let hadManualConflict = false;
+    const currentConflictRefs = new Set<string>();
 
     for (const item of plan) {
       if (item.decision.kind === "noop") {
@@ -207,37 +207,48 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
         deps.refStateRepo.upsert(connectionId, item.refName, item.observedGithubSha, item.observedAzureSha);
         continue;
       }
+
+      if (item.decision.kind === "manual-conflict") {
+        currentConflictRefs.add(item.refName);
+        hadManualConflict = true;
+        const { githubSha, azureSha, githubCommitDate, azureCommitDate } = item.decision;
+        const [githubSummary, azureSummary] = await Promise.all([
+          commitSummary(mirrorDir, githubSha),
+          commitSummary(mirrorDir, azureSha),
+        ]);
+        deps.pendingConflictsRepo.upsert(connectionId, {
+          refName: item.refName,
+          isTag: item.isTag,
+          githubSha,
+          azureSha,
+          githubCommitDate,
+          azureCommitDate,
+          githubSummary,
+          azureSummary,
+        });
+        deps.syncLogsRepo.insert(
+          connectionId,
+          "warn",
+          `Conflict on ${item.refName}: GitHub (${githubSha.slice(0, 7)}, ${githubCommitDate}) and Azure DevOps (${azureSha.slice(0, 7)}, ${azureCommitDate}) have diverged - resolve from the GUI`,
+          { branch: item.refName, githubSha, azureSha, githubCommitDate, azureCommitDate },
+        );
+        continue;
+      }
+
       try {
         await applyDecision(mirrorDir, item, urls);
 
         if (item.decision.kind === "delete") {
           deps.refStateRepo.deleteRef(connectionId, item.refName);
         } else {
-          const sha =
-            item.decision.kind === "create"
-              ? item.decision.sha
-              : item.decision.kind === "fast-forward"
-                ? item.decision.toSha
-                : item.decision.winningSha;
+          const sha = item.decision.kind === "create" ? item.decision.sha : item.decision.toSha;
           deps.refStateRepo.upsert(connectionId, item.refName, sha, sha);
         }
 
-        if (item.decision.kind === "force-overwrite") {
-          hadForceOverwrite = true;
-          deps.syncLogsRepo.insert(connectionId, "warn", `FORCE-OVERWRITE on ${item.refName}: ${item.decision.reason}`, {
-            branch: item.refName,
-            direction: item.decision.direction,
-            oldSha: item.decision.losingSha,
-            newSha: item.decision.winningSha,
-            forceOverwrite: true,
-          });
-        } else {
-          deps.syncLogsRepo.insert(connectionId, "info", `${item.decision.kind} applied to ${item.refName}`, {
-            branch: item.refName,
-            direction: (item.decision as any).direction,
-            forceOverwrite: false,
-          });
-        }
+        deps.syncLogsRepo.insert(connectionId, "info", `${item.decision.kind} applied to ${item.refName}`, {
+          branch: item.refName,
+          direction: item.decision.direction,
+        });
       } catch (err) {
         const classified = classifyGitError(err);
         const message = redactSecrets(classified.message, secrets);
@@ -256,7 +267,11 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
       }
     }
 
-    const status = hadBranchError ? "error" : hadForceOverwrite ? "conflict" : "ok";
+    // Conflicts that no longer reproduce this run (e.g. one side fast-forwarded
+    // onto the other since the last poll) have resolved themselves - drop them.
+    deps.pendingConflictsRepo.pruneStale(connectionId, currentConflictRefs);
+
+    const status = hadBranchError ? "error" : hadManualConflict ? "conflict" : "ok";
     deps.connectionsRepo.update(connectionId, {
       status,
       statusDetail: summarizePlan(plan),

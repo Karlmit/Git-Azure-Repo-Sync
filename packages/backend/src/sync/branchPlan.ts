@@ -34,25 +34,15 @@ export function decideRef(input: RefDecisionInput): RefDecision {
     return { kind: "fast-forward", direction: "to-azure", fromSha: azureSha, toSha: githubSha! };
   }
 
-  // True divergence (including totally unrelated histories) - most-recent-commit wins.
-  const githubDate = input.githubCommitDate ?? "";
-  const azureDate = input.azureCommitDate ?? "";
-  const githubNewer = githubDate > azureDate;
-
-  if (githubNewer) {
-    return {
-      kind: "force-overwrite",
-      direction: "to-azure",
-      winningSha: githubSha!,
-      losingSha: azureSha!,
-      reason: `GitHub tip ${githubSha!.slice(0, 7)} (${githubDate}) is newer than Azure tip ${azureSha!.slice(0, 7)} (${azureDate})`,
-    };
-  }
+  // True divergence (including totally unrelated histories, e.g. a freshly
+  // auto-initialized empty repo on one side). Never auto-resolve this - it's
+  // exactly the case where picking a "winner" automatically can silently
+  // discard real work. Surface it as a pending conflict for a human to resolve.
   return {
-    kind: "force-overwrite",
-    direction: "to-github",
-    winningSha: azureSha!,
-    losingSha: githubSha!,
-    reason: `Azure tip ${azureSha!.slice(0, 7)} (${azureDate}) is newer than GitHub tip ${githubSha!.slice(0, 7)} (${githubDate})`,
+    kind: "manual-conflict",
+    githubSha: githubSha!,
+    azureSha: azureSha!,
+    githubCommitDate: input.githubCommitDate ?? "",
+    azureCommitDate: input.azureCommitDate ?? "",
   };
 }

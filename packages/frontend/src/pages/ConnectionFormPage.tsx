@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, type TestConnectionResult } from "../api/client";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
 interface FormState {
@@ -42,6 +42,9 @@ export function ConnectionFormPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmForcePushOpen, setConfirmForcePushOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -119,6 +122,40 @@ export function ConnectionFormPage() {
     }
   };
 
+  const canTest =
+    form.githubUrl.trim() !== "" &&
+    form.azureOrg.trim() !== "" &&
+    form.azureProject.trim() !== "" &&
+    form.azureRepo.trim() !== "" &&
+    (isEdit || (form.githubPat.trim() !== "" && form.azurePat.trim() !== ""));
+
+  const handleTestConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    setTestError(null);
+    try {
+      const result =
+        isEdit && id
+          ? await api.testExistingConnection(id, {
+              ...(form.githubPat ? { githubPat: form.githubPat } : {}),
+              ...(form.azurePat ? { azurePat: form.azurePat } : {}),
+            })
+          : await api.testNewConnection({
+              githubUrl: form.githubUrl,
+              githubPat: form.githubPat,
+              azureOrg: form.azureOrg,
+              azureProject: form.azureProject,
+              azureRepo: form.azureRepo,
+              azurePat: form.azurePat,
+            });
+      setTestResult(result);
+    } catch (err) {
+      setTestError(err instanceof Error ? err.message : "Test request failed.");
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <div style={{ padding: 24, maxWidth: 560 }}>
       <h1>{isEdit ? "Edit connection" : "Add connection"}</h1>
@@ -176,6 +213,28 @@ export function ConnectionFormPage() {
             required={!isEdit}
           />
         </label>
+
+        <div>
+          <button type="button" onClick={handleTestConnection} disabled={!canTest || testing}>
+            {testing ? "Testing…" : "Test connection"}
+          </button>
+          {!canTest && (
+            <span style={{ marginLeft: 8, fontSize: 12, color: "#6b7280" }}>
+              Fill in the URL/org/project/repo{!isEdit && " and both PATs"} first.
+            </span>
+          )}
+          {testError && <p style={{ color: "#b91c1c", fontSize: 13 }}>{testError}</p>}
+          {testResult && (
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+              <span style={{ color: testResult.github.ok ? "#166534" : "#b91c1c" }}>
+                GitHub: {testResult.github.ok ? "✓" : "✗"} {testResult.github.message}
+              </span>
+              <span style={{ color: testResult.azure.ok ? "#166534" : "#b91c1c" }}>
+                Azure DevOps: {testResult.azure.ok ? "✓" : "✗"} {testResult.azure.message}
+              </span>
+            </div>
+          )}
+        </div>
 
         <fieldset>
           <legend>Branch scope</legend>
@@ -239,8 +298,8 @@ export function ConnectionFormPage() {
 
       <ConfirmDialog
         open={confirmForcePushOpen}
-        title="Heads up: this can force-push"
-        message="If the two repos ever diverge on the same branch, this tool resolves it by force-pushing whichever side has the most recent commit over the other side, overwriting history there. Understood?"
+        title="Heads up: how conflicts are handled"
+        message="Clean changes on either side sync automatically. If GitHub and Azure DevOps ever have genuinely conflicting changes on the same branch, sync pauses on that branch and asks you to pick a side from this app's GUI - nothing is force-pushed automatically. Understood?"
         confirmLabel="Yes, create connection"
         onCancel={() => setConfirmForcePushOpen(false)}
         onConfirm={() => {
