@@ -1,0 +1,15 @@
+{
+  "name": "git-azure-repo-sync",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/backend",
+    "packages/frontend"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=packages/frontend && npm run build --workspace=packages/backend",
+    "test": "npm test --workspace=packages/backend",
+    "dev:backend": "npm run dev --workspace=packages/backend",
+    "dev:frontend": "npm run dev --workspace=packages/frontend"
+  }
+}

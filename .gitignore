@@ -1,0 +1,21 @@
+.planning/
+.opus-pastes/
+.claude/
+.opus/
+.agents/
+
+# gitsync app
+node_modules/
+packages/*/node_modules/
+packages/*/dist/
+packages/frontend/dist/
+data/
+secrets/
+.env
+.env.*
+!.env.example
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.tsbuildinfo
