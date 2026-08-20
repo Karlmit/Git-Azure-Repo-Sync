@@ -15,7 +15,35 @@ connections and watch sync logs.
 ## Running it on Unraid
 
 1. Create a folder for this app's config, e.g. `/mnt/user/appdata/gitsync/`.
-2. Copy `docker-compose.yml` from this repo into that folder.
+2. Copy `docker-compose.yml` from this repo into that folder (reproduced here for
+   reference):
+   ```yaml
+   services:
+     gitsync:
+       image: ghcr.io/karlmit/git-azure-repo-sync:latest
+       container_name: gitsync
+       restart: unless-stopped
+       ports:
+         - "3012:3012"
+       env_file:
+         - .env
+       environment:
+         PORT: "3012"
+         HOST: "0.0.0.0"
+         DB_PATH: "/data/app.db"
+         MIRROR_ROOT: "/data/mirrors"
+       volumes:
+         - gitsync-data:/data
+       healthcheck:
+         test: ["CMD", "node", "-e", "fetch('http://localhost:3012/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+         interval: 30s
+         timeout: 5s
+         retries: 3
+
+   volumes:
+     gitsync-data:
+       driver: local
+   ```
 3. Copy `.env.example` to `.env` in the same folder and fill in real values:
    - `APP_USERNAME` / `APP_PASSWORD` — login for the gitsync web GUI.
    - `ENCRYPTION_KEY` — generate with `openssl rand -base64 32`. This encrypts the
