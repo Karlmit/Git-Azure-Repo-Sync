@@ -38,6 +38,8 @@ approval before it touches anything (see "How syncing works" below).
          MIRROR_ROOT: "/data/mirrors"
          PUID: "${PUID:-1000}"
          PGID: "${PGID:-1000}"
+         NOTIFY_WEBHOOK_URL: "${NOTIFY_WEBHOOK_URL:-}"
+         APP_BASE_URL: "${APP_BASE_URL:-}"
        volumes:
          - /mnt/user/appdata/GithubAzureSync:/data
        healthcheck:
