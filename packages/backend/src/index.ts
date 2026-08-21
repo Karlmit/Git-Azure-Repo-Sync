@@ -26,6 +26,8 @@ async function main() {
     pendingConflictsRepo,
     mirrorRoot: env.MIRROR_ROOT,
     encryptionKey,
+    notifyWebhookUrl: env.NOTIFY_WEBHOOK_URL,
+    appBaseUrl: env.APP_BASE_URL,
   });
 
   const app = buildApp({

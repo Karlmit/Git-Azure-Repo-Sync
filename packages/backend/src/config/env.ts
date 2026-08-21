@@ -13,6 +13,10 @@ const envSchema = z.object({
   APP_USERNAME: z.string().min(1, "APP_USERNAME is required"),
   APP_PASSWORD: z.string().min(1, "APP_PASSWORD is required"),
   APP_VERSION: z.string().default("0.0.0-dev"),
+  /** Optional. When set, an HTTP POST fires here whenever a ref newly needs approval. */
+  NOTIFY_WEBHOOK_URL: z.string().optional(),
+  /** Optional. Where this instance is reachable from, e.g. http://192.168.1.66:3012 - used to link back to the app from notifications. */
+  APP_BASE_URL: z.string().optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

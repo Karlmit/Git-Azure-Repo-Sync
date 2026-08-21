@@ -73,6 +73,11 @@ approval before it touches anything (see "How syncing works" below).
    Optionally add `PUID=99` and `PGID=100` if you're using a bind mount and want it
    owned by Unraid's usual `nobody:users` instead of the `1000:1000` default.
 
+   Optionally add `NOTIFY_WEBHOOK_URL=...` (and `APP_BASE_URL=...` to include a
+   clickable link) to get notified the moment a connection needs your approval
+   (see "Getting notified when something needs approval" below), instead of only
+   finding out next time you open the app.
+
    (If you'd rather start from the repo's own template instead of typing the above
    by hand: `curl -O https://raw.githubusercontent.com/Karlmit/Git-Azure-Repo-Sync/main/.env.example`,
    then `mv .env.example .env` and fill in the placeholders.)
@@ -164,6 +169,42 @@ on the other side. Timestamps can't tell "real work" from "placeholder commit," 
 a purely symmetric model has no natural notion of which side to trust more, so
 gitsync now treats GitHub as ground truth and never silently discards anything from
 it — a human always makes that call for anything arriving from Azure DevOps.
+
+## Getting notified when something needs approval
+
+Set `NOTIFY_WEBHOOK_URL` in your `.env` to get pinged the moment a ref newly needs
+your decision, instead of only finding out next time you happen to open the app.
+It fires once per new pause, not repeatedly on every poll while something stays
+unresolved — so it won't spam you for as long as an item sits waiting.
+
+gitsync sends an HTTP POST to that URL with a JSON body:
+
+```json
+{ "message": "<b>gitsync:</b> connection \"Helpy\" needs your decision on 1 ref: ..." }
+```
+
+`message` is HTML — a short summary naming the connection and, for each newly
+paused ref, its GitHub and Azure DevOps state (commit message, short SHA,
+timestamp, or "doesn't exist"/"deleted" as appropriate). This is intentionally
+generic so it can feed almost any automation that accepts an HTTP-triggered
+webhook with an HTML string, e.g.:
+
+- A **Power Automate** cloud flow with an HTTP "When a HTTP request is received"
+  (or the newer direct-invoke) trigger, feeding the `message` field straight into
+  a "Post a message to myself/a channel (HTML)" Teams action — this is the exact
+  setup this feature was originally built against.
+- A Slack or Discord incoming webhook (you'd need a small transform step, since
+  those expect their own JSON shape rather than a raw HTML string).
+- Anything else that can receive a JSON POST.
+
+Also set `APP_BASE_URL` (e.g. `http://192.168.1.66:3012`, your Unraid box's LAN IP
+and the port from `docker-compose.yml`) to have the message include a link straight
+to the connection that needs attention, instead of having to go find it yourself.
+Update it if that IP ever changes.
+
+If the webhook call fails (unreachable, wrong URL, auth rejected), that failure is
+logged as a warning on the connection but never fails the sync itself — a broken
+notification target can't block syncing.
 
 ## Security notes
 

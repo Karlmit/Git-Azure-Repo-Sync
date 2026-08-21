@@ -10,6 +10,8 @@ import type { RefStateRepo } from "../models/refState.repo";
 import type { PendingConflictsRepo } from "../models/pendingConflicts.repo";
 import { decideRef } from "./branchPlan";
 import type { PlanItem, SyncPlan, SyncResult } from "./types";
+import { sendWebhookNotification } from "../notify/webhook";
+import { formatPauseNotification, type NewlyPausedRef } from "../notify/formatPauseNotification";
 
 export interface SyncEngineDeps {
   connectionsRepo: ConnectionsRepo;
@@ -18,6 +20,10 @@ export interface SyncEngineDeps {
   pendingConflictsRepo: PendingConflictsRepo;
   mirrorRoot: string;
   encryptionKey: Buffer;
+  /** Optional. When set, an HTTP POST fires here whenever a ref newly needs approval. */
+  notifyWebhookUrl?: string;
+  /** Optional. Where this instance is reachable from - used to link back to the app from notifications. */
+  appBaseUrl?: string;
 }
 
 export interface Urls {
@@ -193,6 +199,7 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
     let hadBranchError = false;
     let hadManualConflict = false;
     const currentConflictRefs = new Set<string>();
+    const newlyPaused: NewlyPausedRef[] = [];
 
     for (const item of plan) {
       if (item.decision.kind === "noop") {
@@ -205,6 +212,7 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
       if (item.decision.kind === "needs-approval") {
         currentConflictRefs.add(item.refName);
         hadManualConflict = true;
+        const wasAlreadyPending = deps.pendingConflictsRepo.get(connectionId, item.refName) !== null;
         const { githubSha, azureSha, githubCommitDate, azureCommitDate } = item.decision;
         const [githubSummary, azureSummary] = await Promise.all([
           githubSha ? commitSummary(mirrorDir, githubSha) : Promise.resolve(null),
@@ -220,6 +228,18 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
           githubSummary,
           azureSummary,
         });
+        if (!wasAlreadyPending) {
+          newlyPaused.push({
+            refName: item.refName,
+            isTag: item.isTag,
+            githubSha,
+            azureSha,
+            githubCommitDate,
+            azureCommitDate,
+            githubSummary,
+            azureSummary,
+          });
+        }
         const githubLabel = githubSha ? `${githubSha.slice(0, 7)}, ${githubCommitDate}` : "does not exist";
         const azureLabel = azureSha ? `${azureSha.slice(0, 7)}, ${azureCommitDate}` : "was deleted";
         deps.syncLogsRepo.insert(
@@ -272,6 +292,23 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
       lastSyncedAt: new Date().toISOString(),
     });
     deps.syncLogsRepo.insert(connectionId, "info", "Sync completed", { status });
+
+    if (newlyPaused.length > 0 && deps.notifyWebhookUrl) {
+      try {
+        const html = formatPauseNotification(
+          conn.name,
+          newlyPaused,
+          deps.appBaseUrl ? { baseUrl: deps.appBaseUrl, connectionId } : undefined,
+        );
+        await sendWebhookNotification(deps.notifyWebhookUrl, html);
+      } catch (notifyErr) {
+        deps.syncLogsRepo.insert(
+          connectionId,
+          "warn",
+          `Failed to send pause notification: ${notifyErr instanceof Error ? notifyErr.message : String(notifyErr)}`,
+        );
+      }
+    }
 
     return { connectionId, status, plan };
   } catch (err) {
