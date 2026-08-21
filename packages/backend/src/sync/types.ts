@@ -1,23 +1,23 @@
 /**
- * GitHub is the authoritative side. Whenever GitHub is ahead or equal (including a
- * GitHub-side delete), Azure DevOps is updated automatically - "push-to-azure" and
- * "delete-on-azure" always apply without pausing. Whenever Azure DevOps has *any*
- * content GitHub doesn't (a strict fast-forward-ahead, a true divergence, or a
- * brand-new Azure-only branch never seen before), nothing is pushed automatically -
- * "azure-ahead" always requires an explicit choice from the GUI. Azure-side
- * deletions are never propagated back to GitHub; if Azure loses something GitHub
- * still has, GitHub's copy is simply re-pushed (see decideRef for why).
+ * GitHub is the authoritative side. Whenever GitHub is ahead or equal - a new
+ * commit, a brand-new GitHub branch, or GitHub deleting a branch it used to have -
+ * Azure DevOps is updated automatically ("push-to-azure" / "delete-on-azure").
+ * Anything where Azure DevOps has unique state - strictly ahead, truly diverged, a
+ * brand-new Azure-only ref, *or* Azure DevOps having deleted a ref GitHub still has
+ * - always pauses as "needs-approval" instead of guessing. Resolution is symmetric:
+ * picking a side force-updates the *other* side to match it, including deleting a
+ * ref there if the winning side doesn't have it at all.
  */
 export type RefDecision =
   | { kind: "noop" }
   | { kind: "push-to-azure"; fromSha: string | null; toSha: string }
   | { kind: "delete-on-azure"; sha: string }
   | {
-      kind: "azure-ahead";
+      kind: "needs-approval";
       githubSha: string | null;
-      azureSha: string;
+      azureSha: string | null;
       githubCommitDate: string | null;
-      azureCommitDate: string;
+      azureCommitDate: string | null;
     };
 
 export interface RefDecisionInput {

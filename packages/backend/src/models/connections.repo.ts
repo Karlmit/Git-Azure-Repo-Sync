@@ -21,7 +21,7 @@ function rowToConnection(row: any): Connection {
     branchScope: row.branch_scope,
     branchList: row.branch_list ? JSON.parse(row.branch_list) : [],
     syncTags: !!row.sync_tags,
-    pollIntervalSeconds: row.poll_interval_seconds,
+    pollIntervalMinutes: row.poll_interval_minutes,
     enabled: !!row.enabled,
     status: row.status,
     statusDetail: row.status_detail,
@@ -52,9 +52,9 @@ export class ConnectionsRepo {
         `INSERT INTO connections (
           id, name, github_url, azure_org, azure_project, azure_repo, azure_url,
           github_pat_ciphertext, azure_pat_ciphertext, branch_scope, branch_list,
-          sync_tags, poll_interval_seconds, enabled, status
+          sync_tags, poll_interval_minutes, enabled, status
         ) VALUES (@id, @name, @githubUrl, @azureOrg, @azureProject, @azureRepo, @azureUrl,
-          @githubPat, @azurePat, @branchScope, @branchList, @syncTags, @pollIntervalSeconds, 1, 'idle')`,
+          @githubPat, @azurePat, @branchScope, @branchList, @syncTags, @pollIntervalMinutes, 1, 'idle')`,
       )
       .run({
         id,
@@ -69,7 +69,7 @@ export class ConnectionsRepo {
         branchScope: input.branchScope,
         branchList: JSON.stringify(input.branchList ?? []),
         syncTags: input.syncTags ? 1 : 0,
-        pollIntervalSeconds: input.pollIntervalSeconds,
+        pollIntervalMinutes: input.pollIntervalMinutes,
       });
     return this.getById(id)!;
   }
@@ -106,7 +106,7 @@ export class ConnectionsRepo {
     setField("branch_scope", "branchScope");
     setField("branch_list", "branchList", (v) => JSON.stringify(v ?? []));
     setField("sync_tags", "syncTags", (v) => (v ? 1 : 0));
-    setField("poll_interval_seconds", "pollIntervalSeconds");
+    setField("poll_interval_minutes", "pollIntervalMinutes");
     setField("enabled", "enabled", (v) => (v ? 1 : 0));
     setField("status", "status");
     setField("status_detail", "statusDetail");

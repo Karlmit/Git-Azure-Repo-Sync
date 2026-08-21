@@ -13,7 +13,7 @@ export interface ConnectionPublic {
   branchScope: BranchScope;
   branchList: string[];
   syncTags: boolean;
-  pollIntervalSeconds: number;
+  pollIntervalMinutes: number;
   enabled: boolean;
   status: ConnectionStatus;
   statusDetail: string | null;
@@ -50,12 +50,12 @@ export interface CreateConnectionInput {
   branchScope: BranchScope;
   branchList: string[];
   syncTags: boolean;
-  pollIntervalSeconds: number;
+  pollIntervalMinutes: number;
 }
 
 export type UpdateConnectionInput = Partial<CreateConnectionInput> & { enabled?: boolean };
 
-export type RefDecisionKind = "noop" | "push-to-azure" | "delete-on-azure" | "azure-ahead";
+export type RefDecisionKind = "noop" | "push-to-azure" | "delete-on-azure" | "needs-approval";
 
 export interface SyncPlanItem {
   refName: string;
@@ -76,9 +76,10 @@ export interface PendingConflict {
   isTag: boolean;
   /** Null if this ref has only ever existed on Azure DevOps. */
   githubSha: string | null;
-  azureSha: string;
+  /** Null if Azure DevOps deleted a ref that GitHub still has. */
+  azureSha: string | null;
   githubCommitDate: string | null;
-  azureCommitDate: string;
+  azureCommitDate: string | null;
   githubSummary: string | null;
   azureSummary: string | null;
   detectedAt: string;

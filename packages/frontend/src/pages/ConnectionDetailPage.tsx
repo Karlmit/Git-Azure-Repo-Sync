@@ -49,8 +49,8 @@ export function ConnectionDetailPage() {
     setBanner(null);
     try {
       const result = await api.syncNow(conn.id);
-      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "azure-ahead");
-      const conflictCount = result.plan.filter((p) => p.decision.kind === "azure-ahead").length;
+      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "needs-approval");
+      const conflictCount = result.plan.filter((p) => p.decision.kind === "needs-approval").length;
       if (result.status === "error") {
         setBanner({ kind: "error", text: result.error ?? "Sync failed - see the logs below." });
       } else if (conflictCount > 0) {
@@ -76,18 +76,23 @@ export function ConnectionDetailPage() {
   const confirmResolve = async () => {
     if (!pendingResolve) return;
     const { refName, winner } = pendingResolve;
+    const conflict = (conflicts ?? []).find((c) => c.refName === refName);
     setPendingResolve(null);
     setResolving(refName);
     setBanner(null);
     try {
-      await api.resolveConflict(conn.id, refName, winner);
-      setBanner({
-        kind: "success",
-        text:
-          winner === "azure"
+      const { winningSha } = await api.resolveConflict(conn.id, refName, winner);
+      const text =
+        winningSha === null
+          ? winner === "azure"
+            ? "Resolved - Azure DevOps didn't have this ref, so it was deleted from GitHub too."
+            : "Resolved - GitHub didn't have this ref, so it was deleted from Azure DevOps."
+          : winner === "azure"
             ? "Resolved - pulled Azure DevOps's changes into GitHub."
-            : "Resolved - discarded Azure DevOps's changes, GitHub's version stands.",
-      });
+            : conflict?.azureSha === null
+              ? "Resolved - restored GitHub's version on Azure DevOps."
+              : "Resolved - discarded Azure DevOps's changes, GitHub's version stands.";
+      setBanner({ kind: "success", text });
     } catch (err) {
       setBanner({ kind: "error", text: err instanceof Error ? err.message : "Failed to resolve conflict." });
     } finally {
@@ -156,9 +161,9 @@ export function ConnectionDetailPage() {
         <div style={{ marginBottom: 20 }}>
           <h3>Needs your decision</h3>
           <p style={{ fontSize: 13, color: "#6b7280", marginTop: -4 }}>
-            GitHub always pushes to Azure DevOps automatically - but Azure DevOps has changes on these refs that
-            GitHub doesn't have, so nothing has been touched. Choose whether to pull them into GitHub, or discard
-            them and keep GitHub's version.
+            GitHub always pushes to Azure DevOps automatically, but these refs have something on the Azure DevOps
+            side that GitHub's automatic sync won't touch on its own - new content, or a deletion. Nothing has
+            changed on either side yet; pick how each one should resolve below.
           </p>
           {(conflicts ?? []).map((c) => (
             <ConflictCard
@@ -198,7 +203,9 @@ export function ConnectionDetailPage() {
           const shortName = pendingResolve.refName.replace(/^refs\/(heads|tags)\//, "");
           const conflict = (conflicts ?? []).find((c) => c.refName === pendingResolve.refName);
           if (pendingResolve.winner === "azure") {
-            return `This overwrites GitHub's "${shortName}" with Azure DevOps's version. This cannot be undone automatically.`;
+            return conflict?.azureSha
+              ? `This overwrites GitHub's "${shortName}" with Azure DevOps's version. This cannot be undone automatically.`
+              : `Azure DevOps has no "${shortName}" - this deletes it from GitHub too. This cannot be undone automatically.`;
           }
           return conflict?.githubSha
             ? `This overwrites Azure DevOps's "${shortName}" with GitHub's version. This cannot be undone automatically.`

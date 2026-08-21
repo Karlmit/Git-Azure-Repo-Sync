@@ -53,6 +53,8 @@ async function buildPlanForKind(
     let githubCommitDate: string | null = null;
     let azureCommitDate: string | null = null;
 
+    const previouslySeen = previouslySeenRefs.has(fullRefName);
+
     if (githubSha && azureSha && githubSha !== azureSha) {
       azureIsAncestorOfGithub = await isAncestor(mirrorDir, azureSha, githubSha);
       if (!azureIsAncestorOfGithub) {
@@ -63,9 +65,12 @@ async function buildPlanForKind(
           commitDate(mirrorDir, azureSha),
         ]);
       }
-    } else if (azureSha && !githubSha) {
-      // Azure-only ref - also pauses (unless previously seen), so fetch its date too.
+    } else if (azureSha && !githubSha && !previouslySeen) {
+      // Brand-new Azure-only ref - pauses, so fetch its date too.
       azureCommitDate = await commitDate(mirrorDir, azureSha);
+    } else if (githubSha && !azureSha && previouslySeen) {
+      // Azure DevOps deleted a ref GitHub still has - pauses, so fetch its date too.
+      githubCommitDate = await commitDate(mirrorDir, githubSha);
     }
 
     const decision = decideRef({
@@ -75,7 +80,7 @@ async function buildPlanForKind(
       githubCommitDate,
       azureCommitDate,
       azureIsAncestorOfGithub,
-      previouslySeen: previouslySeenRefs.has(fullRefName),
+      previouslySeen,
     });
 
     items.push({ refName: fullRefName, isTag, decision, observedGithubSha: githubSha, observedAzureSha: azureSha });
@@ -111,7 +116,7 @@ async function applyDecision(mirrorDir: string, item: PlanItem, urls: Urls): Pro
       return;
     }
 
-    case "azure-ahead":
+    case "needs-approval":
       // Never auto-applied - handled separately in the main loop by recording a
       // pending conflict instead of pushing anything.
       return;
@@ -197,13 +202,13 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
         continue;
       }
 
-      if (item.decision.kind === "azure-ahead") {
+      if (item.decision.kind === "needs-approval") {
         currentConflictRefs.add(item.refName);
         hadManualConflict = true;
         const { githubSha, azureSha, githubCommitDate, azureCommitDate } = item.decision;
         const [githubSummary, azureSummary] = await Promise.all([
           githubSha ? commitSummary(mirrorDir, githubSha) : Promise.resolve(null),
-          commitSummary(mirrorDir, azureSha),
+          azureSha ? commitSummary(mirrorDir, azureSha) : Promise.resolve(null),
         ]);
         deps.pendingConflictsRepo.upsert(connectionId, {
           refName: item.refName,
@@ -215,11 +220,12 @@ export async function runSyncForConnection(deps: SyncEngineDeps, connectionId: s
           githubSummary,
           azureSummary,
         });
-        const githubLabel = githubSha ? `${githubSha.slice(0, 7)}, ${githubCommitDate}` : "does not exist yet";
+        const githubLabel = githubSha ? `${githubSha.slice(0, 7)}, ${githubCommitDate}` : "does not exist";
+        const azureLabel = azureSha ? `${azureSha.slice(0, 7)}, ${azureCommitDate}` : "was deleted";
         deps.syncLogsRepo.insert(
           connectionId,
           "warn",
-          `Azure DevOps has changes GitHub doesn't on ${item.refName} (GitHub: ${githubLabel}; Azure DevOps: ${azureSha.slice(0, 7)}, ${azureCommitDate}) - resolve from the GUI`,
+          `Needs approval on ${item.refName} (GitHub: ${githubLabel}; Azure DevOps: ${azureLabel}) - resolve from the GUI`,
           { branch: item.refName, githubSha, azureSha, githubCommitDate, azureCommitDate },
         );
         continue;

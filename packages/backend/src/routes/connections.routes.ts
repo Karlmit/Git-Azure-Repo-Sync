@@ -7,19 +7,21 @@ import { testRemoteAccess } from "../git/testAccess";
 import { ConnectionsRepo, toPublic } from "../models/connections.repo";
 import type { Scheduler } from "../scheduler/scheduler";
 
-const createSchema = z.object({
-  name: z.string().min(1),
-  githubUrl: z.string().url(),
-  azureOrg: z.string().min(1),
-  azureProject: z.string().min(1),
-  azureRepo: z.string().min(1),
-  githubPat: z.string().min(1),
-  azurePat: z.string().min(1),
-  branchScope: z.enum(["all", "explicit"]).default("all"),
-  branchList: z.array(z.string()).default([]),
-  syncTags: z.boolean().default(true),
-  pollIntervalSeconds: z.coerce.number().int().min(30).default(120),
-});
+function buildCreateSchema(defaultPollIntervalMinutes: number) {
+  return z.object({
+    name: z.string().min(1),
+    githubUrl: z.string().url(),
+    azureOrg: z.string().min(1),
+    azureProject: z.string().min(1),
+    azureRepo: z.string().min(1),
+    githubPat: z.string().min(1),
+    azurePat: z.string().min(1),
+    branchScope: z.enum(["all", "explicit"]).default("all"),
+    branchList: z.array(z.string()).default([]),
+    syncTags: z.boolean().default(true),
+    pollIntervalMinutes: z.coerce.number().int().min(1).default(defaultPollIntervalMinutes),
+  });
+}
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
@@ -32,7 +34,7 @@ const updateSchema = z.object({
   branchScope: z.enum(["all", "explicit"]).optional(),
   branchList: z.array(z.string()).optional(),
   syncTags: z.boolean().optional(),
-  pollIntervalSeconds: z.coerce.number().int().min(30).optional(),
+  pollIntervalMinutes: z.coerce.number().int().min(1).optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -52,9 +54,16 @@ const testExistingSchema = z.object({
 
 export async function registerConnectionsRoutes(
   app: FastifyInstance,
-  deps: { connectionsRepo: ConnectionsRepo; scheduler: Scheduler; mirrorRoot: string; encryptionKey: Buffer },
+  deps: {
+    connectionsRepo: ConnectionsRepo;
+    scheduler: Scheduler;
+    mirrorRoot: string;
+    encryptionKey: Buffer;
+    defaultPollIntervalMinutes: number;
+  },
 ): Promise<void> {
-  const { connectionsRepo, scheduler, mirrorRoot, encryptionKey } = deps;
+  const { connectionsRepo, scheduler, mirrorRoot, encryptionKey, defaultPollIntervalMinutes } = deps;
+  const createSchema = buildCreateSchema(defaultPollIntervalMinutes);
 
   app.get("/api/connections", async () => {
     return connectionsRepo.listAll().map(toPublic);

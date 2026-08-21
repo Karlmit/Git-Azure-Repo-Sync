@@ -2,9 +2,10 @@ import type { RefDecision, RefDecisionInput } from "./types";
 
 /**
  * GitHub is authoritative. Azure DevOps only ever gets auto-updated when GitHub is
- * ahead or equal; anything where Azure has content GitHub doesn't (strictly ahead,
- * truly diverged, or a brand-new Azure-only ref) always pauses for an explicit
- * choice in the GUI, never auto-resolved.
+ * ahead or equal (including GitHub deleting something). Anything where Azure DevOps
+ * has unique state relative to GitHub - strictly ahead, truly diverged, a brand-new
+ * Azure-only ref, or Azure DevOps having deleted a ref GitHub still has - always
+ * pauses for an explicit choice in the GUI, never auto-resolved.
  */
 export function decideRef(input: RefDecisionInput): RefDecision {
   const { githubSha, azureSha } = input;
@@ -14,9 +15,19 @@ export function decideRef(input: RefDecisionInput): RefDecision {
   }
 
   if (azureSha === null && githubSha !== null) {
-    // Azure doesn't have it (brand new, or it lost it) - GitHub is authoritative,
-    // so always (re)push regardless of history. This is also how an accidental
-    // Azure-side deletion self-heals: GitHub's copy just gets pushed back.
+    if (input.previouslySeen) {
+      // Azure DevOps deleted something that used to exist on both sides - don't
+      // assume that was accidental (auto-recreate) or intentional (auto-delete from
+      // GitHub too). Pause and let a human decide.
+      return {
+        kind: "needs-approval",
+        githubSha,
+        azureSha: null,
+        githubCommitDate: input.githubCommitDate,
+        azureCommitDate: null,
+      };
+    }
+    // Never synced before - GitHub is authoritative, so just push it across.
     return { kind: "push-to-azure", fromSha: null, toSha: githubSha };
   }
 
@@ -29,11 +40,11 @@ export function decideRef(input: RefDecisionInput): RefDecision {
     // A ref that has only ever existed on Azure DevOps - needs an explicit choice
     // before it's imported into GitHub, even though nothing would be overwritten.
     return {
-      kind: "azure-ahead",
+      kind: "needs-approval",
       githubSha: null,
       azureSha,
       githubCommitDate: null,
-      azureCommitDate: input.azureCommitDate ?? "",
+      azureCommitDate: input.azureCommitDate,
     };
   }
 
@@ -49,10 +60,10 @@ export function decideRef(input: RefDecisionInput): RefDecision {
   // that caused real damage before: an auto-generated placeholder commit on Azure
   // being "newer" than real GitHub work is no longer a signal this code trusts.
   return {
-    kind: "azure-ahead",
+    kind: "needs-approval",
     githubSha,
     azureSha: azureSha!,
     githubCommitDate: input.githubCommitDate,
-    azureCommitDate: input.azureCommitDate ?? "",
+    azureCommitDate: input.azureCommitDate,
   };
 }

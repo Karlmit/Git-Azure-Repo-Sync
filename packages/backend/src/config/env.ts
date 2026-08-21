@@ -7,7 +7,7 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   DB_PATH: z.string().default("/data/app.db"),
   MIRROR_ROOT: z.string().default("/data/mirrors"),
-  DEFAULT_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(120),
+  DEFAULT_POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(2),
   LOG_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
   LOG_MAX_ROWS_PER_CONNECTION: z.coerce.number().int().positive().default(2000),
   APP_USERNAME: z.string().min(1, "APP_USERNAME is required"),

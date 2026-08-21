@@ -35,6 +35,7 @@ async function main() {
     scheduler,
     mirrorRoot: env.MIRROR_ROOT,
     encryptionKey,
+    defaultPollIntervalMinutes: env.DEFAULT_POLL_INTERVAL_MINUTES,
     appUsername: env.APP_USERNAME,
     appPassword: env.APP_PASSWORD,
     version: env.APP_VERSION,

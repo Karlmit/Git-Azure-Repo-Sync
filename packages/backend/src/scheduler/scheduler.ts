@@ -48,7 +48,7 @@ export class Scheduler {
   scheduleConnection(conn: Connection): void {
     this.unscheduleConnection(conn.id);
     if (!conn.enabled) return;
-    const intervalMs = conn.pollIntervalSeconds * 1000;
+    const intervalMs = conn.pollIntervalMinutes * 60 * 1000;
     const timer = setInterval(() => {
       this.triggerSync(conn.id).catch((err) => {
         // eslint-disable-next-line no-console

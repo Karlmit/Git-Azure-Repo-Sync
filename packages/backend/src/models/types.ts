@@ -15,7 +15,7 @@ export interface Connection {
   branchScope: BranchScope;
   branchList: string[];
   syncTags: boolean;
-  pollIntervalSeconds: number;
+  pollIntervalMinutes: number;
   enabled: boolean;
   status: ConnectionStatus;
   statusDetail: string | null;
@@ -41,7 +41,7 @@ export interface CreateConnectionInput {
   branchScope: BranchScope;
   branchList: string[];
   syncTags: boolean;
-  pollIntervalSeconds: number;
+  pollIntervalMinutes: number;
   /** Test-only hook: overrides the derived dev.azure.com URL (e.g. with a local file:// bare repo). */
   azureUrlOverride?: string;
 }
@@ -57,7 +57,7 @@ export interface UpdateConnectionInput {
   branchScope?: BranchScope;
   branchList?: string[];
   syncTags?: boolean;
-  pollIntervalSeconds?: number;
+  pollIntervalMinutes?: number;
   enabled?: boolean;
   status?: ConnectionStatus;
   statusDetail?: string | null;
@@ -88,9 +88,10 @@ export interface PendingConflictRow {
   isTag: boolean;
   /** Null if this ref has only ever existed on Azure DevOps. */
   githubSha: string | null;
-  azureSha: string;
+  /** Null if Azure DevOps deleted a ref that GitHub still has. */
+  azureSha: string | null;
   githubCommitDate: string | null;
-  azureCommitDate: string;
+  azureCommitDate: string | null;
   githubSummary: string | null;
   azureSummary: string | null;
   detectedAt: string;

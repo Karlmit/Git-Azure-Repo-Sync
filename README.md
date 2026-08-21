@@ -137,24 +137,24 @@ GitHub is authoritative. For each branch/tag, on every poll:
   covers a new commit, a brand-new GitHub branch, or GitHub deleting a branch it
   used to have (that deletion propagates to Azure DevOps too). No confirmation
   needed, since nothing on Azure DevOps is ever at risk of being lost this way.
-- **If Azure DevOps has anything GitHub doesn't — nothing is pushed automatically.**
-  This covers three cases, all treated identically: Azure DevOps is cleanly ahead
-  (someone pushed there directly while you were working from GitHub), the two sides
-  have truly diverged (including totally unrelated histories — e.g. a brand-new
-  Azure DevOps repo that auto-created its own initial commit), or a branch exists
-  only on Azure DevOps and has never been seen before. In every case, that ref is
-  left exactly as-is on both sides, the connection's status flips to `conflict`, and
-  it shows up under "Needs your decision" on the connection's detail page with both
-  sides' commit (SHA, timestamp, message) shown side by side. You choose: **pull
-  Azure DevOps's version into GitHub**, or **discard it and push GitHub's version
-  over it** (which deletes the ref from Azure DevOps if GitHub never had it at all).
+- **If Azure DevOps has anything GitHub doesn't, or is missing something GitHub
+  still has — nothing is pushed automatically.** This covers four cases, all
+  treated identically: Azure DevOps is cleanly ahead (someone pushed there directly
+  while you were working from GitHub), the two sides have truly diverged (including
+  totally unrelated histories — e.g. a brand-new Azure DevOps repo that
+  auto-created its own initial commit), a branch exists only on Azure DevOps and
+  has never been seen before, or Azure DevOps lost a branch that GitHub still has
+  (accidentally or otherwise). In every case, nothing is touched on either side,
+  the connection's status flips to `conflict`, and it shows up under "Needs your
+  decision" on the connection's detail page with both sides' commit context (SHA,
+  timestamp, message, or "doesn't exist"/"deleted" as appropriate) shown side by
+  side. You choose: **make GitHub match Azure DevOps** (pulling Azure DevOps's
+  version in, or deleting from GitHub if Azure DevOps doesn't have it), or **make
+  Azure DevOps match GitHub** (pushing GitHub's version over it, restoring it if
+  Azure DevOps deleted it, or deleting it from Azure DevOps if GitHub never had it).
   Only then does anything get pushed. If the two sides resolve themselves before you
   get to it (e.g. someone fast-forwards one onto the other outside gitsync), the
   pending conflict just disappears on the next poll — nothing to clean up.
-- **Azure DevOps-side deletions never propagate to GitHub.** If Azure DevOps loses a
-  branch that GitHub still has (accidentally or otherwise), GitHub's copy is simply
-  re-pushed to recreate it — GitHub's state can never shrink because of something
-  that happened on Azure DevOps.
 
 This direction was a deliberate design choice after an early version auto-resolved
 divergence by picking whichever side had the most recent commit *timestamp* —

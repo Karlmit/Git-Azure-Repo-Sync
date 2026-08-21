@@ -14,7 +14,7 @@ interface FormState {
   branchScope: "all" | "explicit";
   branchListText: string;
   syncTags: boolean;
-  pollIntervalSeconds: number;
+  pollIntervalMinutes: number;
 }
 
 const EMPTY: FormState = {
@@ -28,7 +28,7 @@ const EMPTY: FormState = {
   branchScope: "all",
   branchListText: "",
   syncTags: true,
-  pollIntervalSeconds: 120,
+  pollIntervalMinutes: 2,
 };
 
 export function ConnectionFormPage() {
@@ -60,7 +60,7 @@ export function ConnectionFormPage() {
         branchScope: conn.branchScope,
         branchListText: conn.branchList.join("\n"),
         syncTags: conn.syncTags,
-        pollIntervalSeconds: conn.pollIntervalSeconds,
+        pollIntervalMinutes: conn.pollIntervalMinutes,
       });
       setGithubPatSet(conn.githubPatSet);
       setAzurePatSet(conn.azurePatSet);
@@ -88,7 +88,7 @@ export function ConnectionFormPage() {
           branchScope: form.branchScope,
           branchList,
           syncTags: form.syncTags,
-          pollIntervalSeconds: form.pollIntervalSeconds,
+          pollIntervalMinutes: form.pollIntervalMinutes,
         });
       } else {
         await api.createConnection({
@@ -102,7 +102,7 @@ export function ConnectionFormPage() {
           branchScope: form.branchScope,
           branchList,
           syncTags: form.syncTags,
-          pollIntervalSeconds: form.pollIntervalSeconds,
+          pollIntervalMinutes: form.pollIntervalMinutes,
         });
       }
       navigate("/");
@@ -275,12 +275,12 @@ export function ConnectionFormPage() {
         </label>
 
         <label>
-          Poll interval (seconds, min 30)
+          Poll interval (minutes, min 1)
           <input
             type="number"
-            min={30}
-            value={form.pollIntervalSeconds}
-            onChange={(e) => setForm({ ...form, pollIntervalSeconds: Number(e.target.value) })}
+            min={1}
+            value={form.pollIntervalMinutes}
+            onChange={(e) => setForm({ ...form, pollIntervalMinutes: Number(e.target.value) })}
           />
         </label>
 

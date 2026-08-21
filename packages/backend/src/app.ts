@@ -23,6 +23,7 @@ export interface BuildAppOpts {
   scheduler: Scheduler;
   mirrorRoot: string;
   encryptionKey: Buffer;
+  defaultPollIntervalMinutes: number;
   appUsername: string;
   appPassword: string;
   version: string;
@@ -51,6 +52,7 @@ export function buildApp(opts: BuildAppOpts): FastifyInstance {
     scheduler: opts.scheduler,
     mirrorRoot: opts.mirrorRoot,
     encryptionKey: opts.encryptionKey,
+    defaultPollIntervalMinutes: opts.defaultPollIntervalMinutes,
   });
   registerLogsRoutes(app, { syncLogsRepo: opts.syncLogsRepo });
   registerConflictsRoutes(app, { pendingConflictsRepo: opts.pendingConflictsRepo, scheduler: opts.scheduler });

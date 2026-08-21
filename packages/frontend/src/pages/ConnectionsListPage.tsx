@@ -39,8 +39,8 @@ export function ConnectionsListPage() {
     try {
       const result = await api.syncNow(conn.id);
       await refresh();
-      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "azure-ahead");
-      const conflictCount = result.plan.filter((p) => p.decision.kind === "azure-ahead").length;
+      const changed = result.plan.filter((p) => p.decision.kind !== "noop" && p.decision.kind !== "needs-approval");
+      const conflictCount = result.plan.filter((p) => p.decision.kind === "needs-approval").length;
       if (result.status === "error") {
         setMessage({ kind: "error", text: `${conn.name}: sync failed - ${result.error ?? "see its logs"}` });
       } else if (conflictCount > 0) {
@@ -106,7 +106,7 @@ export function ConnectionsListPage() {
               <td style={{ padding: 8, fontSize: 13, color: "#6b7280" }}>
                 {conn.lastSyncedAt ? new Date(conn.lastSyncedAt).toLocaleString() : "never"}
               </td>
-              <td style={{ padding: 8 }}>{conn.pollIntervalSeconds}s</td>
+              <td style={{ padding: 8 }}>{conn.pollIntervalMinutes}m</td>
               <td style={{ padding: 8 }}>{conn.enabled ? "yes" : "paused"}</td>
               <td style={{ padding: 8, display: "flex", gap: 6 }}>
                 <button disabled={busyId === conn.id} onClick={() => handleSyncNow(conn)}>

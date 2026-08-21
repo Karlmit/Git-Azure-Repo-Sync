@@ -46,7 +46,7 @@ function createConnection(
     branchScope: "all",
     branchList: [],
     syncTags: true,
-    pollIntervalSeconds: 120,
+    pollIntervalMinutes: 2,
     ...overrides,
   });
 }
@@ -133,8 +133,8 @@ test("Azure strictly ahead (clean ancestor, but Azure): pauses instead of auto-f
 
   assert.equal(result.status, "conflict");
   const item = result.plan.find((p) => p.refName === "refs/heads/main");
-  assert.equal(item?.decision.kind, "azure-ahead");
-  if (item?.decision.kind === "azure-ahead") {
+  assert.equal(item?.decision.kind, "needs-approval");
+  if (item?.decision.kind === "needs-approval") {
     assert.equal(item.decision.githubSha, sha1);
     assert.equal(item.decision.azureSha, sha2);
   }
@@ -161,7 +161,7 @@ test("true divergence (unrelated histories) also pauses as azure-ahead", async (
 
   assert.equal(result.status, "conflict");
   const item = result.plan.find((p) => p.refName === "refs/heads/main");
-  assert.equal(item?.decision.kind, "azure-ahead");
+  assert.equal(item?.decision.kind, "needs-approval");
   assert.equal(revParse(github), shaGithub);
   assert.equal(revParse(azure), shaAzure);
 });
@@ -236,8 +236,8 @@ test("brand-new Azure-only branch pauses for approval instead of auto-importing"
 
   assert.equal(result.status, "conflict");
   const item = result.plan.find((p) => p.refName === "refs/heads/azure-only-feature");
-  assert.equal(item?.decision.kind, "azure-ahead");
-  if (item?.decision.kind === "azure-ahead") {
+  assert.equal(item?.decision.kind, "needs-approval");
+  if (item?.decision.kind === "needs-approval") {
     assert.equal(item.decision.githubSha, null);
     assert.equal(item.decision.azureSha, featureSha);
   }
@@ -318,7 +318,7 @@ test("GitHub-side branch deletion propagates to Azure DevOps automatically", asy
   assert.equal(revParse(azure, "refs/heads/feature"), null);
 });
 
-test("Azure-side branch deletion does NOT propagate to GitHub - GitHub's copy is re-pushed instead", async () => {
+test("Azure-side branch deletion pauses for approval instead of silently propagating or recreating", async () => {
   const deps = createDeps();
   const github = fx.makeBareRepo();
   const azure = fx.makeBareRepo();
@@ -340,12 +340,71 @@ test("Azure-side branch deletion does NOT propagate to GitHub - GitHub's copy is
   sh("-C", azure, "branch", "-D", "feature");
 
   const second = await runSyncForConnection(deps, conn.id);
-  assert.equal(second.status, "ok");
+  assert.equal(second.status, "conflict");
   const item = second.plan.find((p) => p.refName === "refs/heads/feature");
-  assert.equal(item?.decision.kind, "push-to-azure");
-  // GitHub still has it, and it's been recreated on Azure DevOps to match.
+  assert.equal(item?.decision.kind, "needs-approval");
+  if (item?.decision.kind === "needs-approval") {
+    assert.equal(item.decision.githubSha, featureSha);
+    assert.equal(item.decision.azureSha, null);
+  }
+  // Nothing touched automatically either way.
   assert.equal(revParse(github, "refs/heads/feature"), featureSha);
+  assert.equal(revParse(azure, "refs/heads/feature"), null);
+
+  const conflict = deps.pendingConflictsRepo.get(conn.id, "refs/heads/feature");
+  assert.equal(conflict?.azureSha, null);
+});
+
+test("Azure-side branch deletion: restoring on Azure DevOps re-pushes GitHub's copy", async () => {
+  const deps = createDeps();
+  const github = fx.makeBareRepo();
+  const azure = fx.makeBareRepo();
+  const work = fx.makeWorkTree();
+
+  fx.commitFile(work, "base");
+  fx.push(work, github, "main");
+  fx.push(work, azure, "main");
+  sh("-C", work, "checkout", "-b", "feature");
+  const featureSha = fx.commitFile(work, "feature-work");
+  fx.push(work, github, "feature");
+  fx.push(work, azure, "feature");
+
+  const conn = createConnection(deps, github, azure);
+  await runSyncForConnection(deps, conn.id);
+  sh("-C", azure, "branch", "-D", "feature");
+  await runSyncForConnection(deps, conn.id);
+
+  const { winningSha } = await resolveConflict(deps, conn.id, "refs/heads/feature", "github");
+
+  assert.equal(winningSha, featureSha);
   assert.equal(revParse(azure, "refs/heads/feature"), featureSha);
+  assert.equal(deps.pendingConflictsRepo.get(conn.id, "refs/heads/feature"), null);
+});
+
+test("Azure-side branch deletion: accepting it deletes the branch from GitHub too", async () => {
+  const deps = createDeps();
+  const github = fx.makeBareRepo();
+  const azure = fx.makeBareRepo();
+  const work = fx.makeWorkTree();
+
+  fx.commitFile(work, "base");
+  fx.push(work, github, "main");
+  fx.push(work, azure, "main");
+  sh("-C", work, "checkout", "-b", "feature");
+  fx.commitFile(work, "feature-work");
+  fx.push(work, github, "feature");
+  fx.push(work, azure, "feature");
+
+  const conn = createConnection(deps, github, azure);
+  await runSyncForConnection(deps, conn.id);
+  sh("-C", azure, "branch", "-D", "feature");
+  await runSyncForConnection(deps, conn.id);
+
+  const { winningSha } = await resolveConflict(deps, conn.id, "refs/heads/feature", "azure");
+
+  assert.equal(winningSha, null);
+  assert.equal(revParse(github, "refs/heads/feature"), null);
+  assert.equal(deps.pendingConflictsRepo.get(conn.id, "refs/heads/feature"), null);
 });
 
 test("tag creation propagates to the side missing it", async () => {
@@ -391,7 +450,7 @@ test("a moved tag where Azure is ahead also pauses as azure-ahead", async () => 
 
   assert.equal(result.status, "conflict");
   const tagItem = result.plan.find((p) => p.refName === "refs/tags/v1.0.0");
-  assert.equal(tagItem?.decision.kind, "azure-ahead");
+  assert.equal(tagItem?.decision.kind, "needs-approval");
   assert.equal(revParse(github, "refs/tags/v1.0.0"), base);
   assert.equal(revParse(azure, "refs/tags/v1.0.0"), moved);
 
