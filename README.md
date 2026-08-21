@@ -58,30 +58,12 @@ approval before it touches anything (see "How syncing works" below).
    already use.
 3. In that **same folder**, create a file named `.env` next to `docker-compose.yml`
    (`docker-compose.yml` won't start without it — `env_file: [.env]` expects it to
-   exist there). It needs exactly these three keys:
-   ```
-   APP_USERNAME=choose-a-username
-   APP_PASSWORD=choose-a-strong-password
-   ENCRYPTION_KEY=paste-the-output-of-the-command-below-here
-   ```
-   - `APP_USERNAME` / `APP_PASSWORD` — login for the gitsync web GUI.
-   - `ENCRYPTION_KEY` — a 32-byte key, base64-encoded. Generate one with:
-     ```
-     openssl rand -base64 32
-     ```
-     This encrypts the GitHub/Azure DevOps PATs you'll enter later, at rest in the
-     SQLite database. Paste the exact output as the value, with no extra quotes.
+   exist there). See [Environment variables](#environment-variables) below for the
+   full list and what each one does — `APP_USERNAME`, `APP_PASSWORD`, and
+   `ENCRYPTION_KEY` are required, everything else is optional.
 
-   Optionally add `PUID=99` and `PGID=100` if you're using a bind mount and want it
-   owned by Unraid's usual `nobody:users` instead of the `1000:1000` default.
-
-   Optionally add `NOTIFY_WEBHOOK_URL=...` (and `APP_BASE_URL=...` to include a
-   clickable link) to get notified the moment a connection needs your approval
-   (see "Getting notified when something needs approval" below), instead of only
-   finding out next time you open the app.
-
-   (If you'd rather start from the repo's own template instead of typing the above
-   by hand: `curl -O https://raw.githubusercontent.com/Karlmit/Git-Azure-Repo-Sync/main/.env.example`,
+   (If you'd rather start from the repo's own template instead of typing it out by
+   hand: `curl -O https://raw.githubusercontent.com/Karlmit/Git-Azure-Repo-Sync/main/.env.example`,
    then `mv .env.example .env` and fill in the placeholders.)
 4. From that folder, run:
    ```
@@ -91,6 +73,52 @@ approval before it touches anything (see "How syncing works" below).
    wire up a GitHub repo and an Azure DevOps repo. You'll need a PAT for each side:
    - GitHub: a personal access token with `repo` scope.
    - Azure DevOps: a PAT with `Code (Read & Write)` scope.
+
+### Environment variables
+
+Everything gitsync reads from `.env`. Only the first three are required:
+
+```
+APP_USERNAME=choose-a-username
+APP_PASSWORD=choose-a-strong-password
+ENCRYPTION_KEY=paste-the-output-of-the-command-below-here
+
+PUID=1000
+PGID=1000
+
+NOTIFY_WEBHOOK_URL=
+APP_BASE_URL=
+
+LOG_LEVEL=info
+DEFAULT_POLL_INTERVAL_MINUTES=2
+LOG_RETENTION_DAYS=30
+LOG_MAX_ROWS_PER_CONNECTION=2000
+```
+
+- **`APP_USERNAME` / `APP_PASSWORD`** *(required)* — login for the gitsync web GUI.
+- **`ENCRYPTION_KEY`** *(required)* — a 32-byte key, base64-encoded. Generate one
+  with `openssl rand -base64 32` and paste the exact output, with no extra quotes.
+  This encrypts the GitHub/Azure DevOps PATs you'll enter later, at rest in the
+  SQLite database.
+- **`PUID` / `PGID`** *(optional, default `1000`/`1000`)* — only matters if you're
+  using a bind mount for `/data`. The container starts as root, `chown`s that
+  folder to this user, then drops to it before running anything, so a bind mount
+  works regardless of what it was owned by beforehand. Set these to `99`/`100` if
+  you'd rather match the `nobody:users` ownership your other Unraid shares use.
+- **`NOTIFY_WEBHOOK_URL`** *(optional)* — when set, gitsync sends an HTTP POST here
+  the moment a ref newly needs your approval (once per new pause, not repeatedly
+  while it stays unresolved). See "Getting notified when something needs approval"
+  below for the request format and example setups.
+- **`APP_BASE_URL`** *(optional)* — e.g. `http://192.168.1.66:3012`, wherever this
+  instance is reachable on your LAN. When set, notifications include a direct link
+  to the connection that needs attention. Update this if that IP ever changes.
+- **`LOG_LEVEL`** *(optional, default `info`)* — `debug`, `info`, `warn`, or `error`.
+- **`DEFAULT_POLL_INTERVAL_MINUTES`** *(optional, default `2`)* — how often a newly
+  created connection polls, until you change it per-connection in the GUI.
+- **`LOG_RETENTION_DAYS`** *(optional, default `30`)* — sync log rows older than
+  this get pruned daily.
+- **`LOG_MAX_ROWS_PER_CONNECTION`** *(optional, default `2000`)* — a hard cap on
+  log rows kept per connection, checked after every sync.
 
 ### Getting updates
 
