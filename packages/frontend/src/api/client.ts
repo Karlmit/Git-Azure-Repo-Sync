@@ -104,10 +104,19 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Only declare a JSON content type when we're actually sending a body - Fastify
+  // rejects a request that claims Content-Type: application/json but has no body
+  // with a 400 (FST_ERR_CTP_EMPTY_JSON_BODY), which broke every no-body call
+  // (sync-now, pause, resume, delete, logout).
+  const headers: HeadersInit = { ...(init?.headers ?? {}) };
+  if (init?.body !== undefined) {
+    (headers as Record<string, string>)["Content-Type"] = "application/json";
+  }
+
   const res = await fetch(`/api${path}`, {
     ...init,
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers,
   });
   if (!res.ok) {
     let message = res.statusText;
